@@ -1,22 +1,29 @@
-const { setGlobalOptions } = require("firebase-functions");
-const { onRequest } = require("firebase-functions/https");
+const { onRequest } = require("firebase-functions/v2/https");
+const cors = require("cors")({ origin: true });
 const { Resend } = require("resend");
 
-setGlobalOptions({ maxInstances: 10 });
-
-const resend = new Resend("re_FKwHjZyR_CRVVWwcDgYpFGwdCvFviyH9i");
+const resend = new Resend("re_FKwHjZyR_CRVVWwcDgYpFGwdCvFviyH9iI");
 
 exports.enviarEmail = onRequest(async (req, res) => {
-  try {
-    await resend.emails.send({
-      from: "onboarding@resend.dev",
-      to: "wesleytenesv@gmail.com",
-      subject: "Teste do sistema",
-      html: "<h1>Email funcionando 🚀</h1>",
-    });
+  cors(req, res, async () => {
+    try {
+      const { email, nome, arquivo } = req.body || {};
 
-    res.send("Email enviado com sucesso!");
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Erro ao enviar email");
-  }
+      await resend.emails.send({
+        from: "onboarding@resend.dev",
+        to: email || "wesleytenesv@gmail.com",
+        subject: "Novo documento recebido",
+        html: `
+          <h2>Novo documento recebido</h2>
+          <p><b>Cliente:</b> ${nome || "Não informado"}</p>
+          <p><b>Arquivo:</b> ${arquivo || "Não informado"}</p>
+        `,
+      });
+
+      res.status(200).send("Email enviado com sucesso!");
+    } catch (error) {
+      console.error(error);
+      res.status(500).send("Erro ao enviar email");
+    }
+  });
+});
