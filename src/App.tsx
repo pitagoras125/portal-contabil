@@ -36,7 +36,7 @@ export default function App() {
 
   const [clienteDestino, setClienteDestino] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [categoria, setCategoria] = useState("Guias e Impostos");
+  const [categoria, setCategoria] = useState("Fiscal");
   const [informe, setInforme] = useState("");
 
   useEffect(() => {
@@ -54,21 +54,15 @@ export default function App() {
     setDocs(docsSnap.docs.map((d) => d.data()));
   }
 
-  async function enviarAvisoEmail(dados: {
-    email: string;
-    nome: string;
-    arquivo: string;
-  }) {
+  async function enviarAvisoEmail(dados: { email: string; nome: string; arquivo: string }) {
     try {
       await fetch(URL_EMAIL, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(dados),
       });
     } catch (erro) {
-      console.warn("Falha ao enviar e-mail de aviso:", erro);
+      console.warn("Falha ao enviar aviso:", erro);
     }
   }
 
@@ -151,7 +145,6 @@ export default function App() {
       });
 
       alert("Documento enviado!");
-
       setFile(null);
       await carregarDados();
     } catch (erro) {
@@ -202,7 +195,7 @@ export default function App() {
         <div style={styles.loginCard}>
           <img src={logo} style={styles.loginLogo} />
           <h1 style={styles.loginTitle}>Portal do Cliente</h1>
-          <p style={styles.loginText}>Acesse seus documentos, boletos, CNDs e informativos.</p>
+          <p style={styles.loginText}>Pitágoras Contabilidade</p>
 
           <input style={styles.input} placeholder="E-mail" onChange={(e) => setEmail(e.target.value)} />
           <input style={styles.input} type="password" placeholder="Senha" onChange={(e) => setSenha(e.target.value)} />
@@ -236,73 +229,172 @@ export default function App() {
 
   const documentosContador = docs.filter((d) => d.departamento === categoria);
 
+  const totalDocumentos = isContador ? docs.length : documentosDoCliente.length;
+  const totalBoletos = boletos.length;
+  const totalCnds = cnds.length;
+  const totalPendentes = isContador ? clientes.length : documentosRecebidos.length;
+
   return (
-    <div style={styles.app}>
-      <header style={styles.topHeader}>
-        <div style={styles.brandArea}>
-          <img src={logo} style={styles.headerLogo} />
-          <div>
-            <h1 style={styles.title}>{isContador ? "Painel do Contador" : "Portal do Cliente"}</h1>
-            <p style={styles.subtitle}>Empresa logada: <strong>{empresa}</strong></p>
-          </div>
+    <div style={styles.page}>
+      <aside style={styles.sidebar}>
+        <div style={styles.logoBox}>
+          <img src={logo} style={styles.sideLogo} />
         </div>
 
-        <button style={styles.logoutButton} onClick={sair}>Sair</button>
-      </header>
+        <div style={styles.menu}>
+          <button style={styles.menuActive}>🏠 Dashboard</button>
 
-      {isContador && (
-        <nav style={styles.topMenu}>
-          {categoriasContador.map((item) => (
-            <button
-              key={item}
-              onClick={() => setCategoria(item)}
-              style={{
-                ...styles.menuButton,
-                background: categoria === item ? "#0f3d75" : "#ffffff",
-                color: categoria === item ? "#ffffff" : "#0f3d75",
-              }}
-            >
-              {item}
-            </button>
-          ))}
-        </nav>
-      )}
+          {isContador ? (
+            categoriasContador.map((item) => (
+              <button
+                key={item}
+                onClick={() => setCategoria(item)}
+                style={categoria === item ? styles.menuActive : styles.menuItem}
+              >
+                📁 {item}
+              </button>
+            ))
+          ) : (
+            <>
+              <button style={styles.menuItem}>📄 Documentos</button>
+              <button style={styles.menuItem}>💳 Boletos</button>
+              <button style={styles.menuItem}>✅ CNDs</button>
+              <button style={styles.menuItem}>🔔 Informativos</button>
+            </>
+          )}
+        </div>
 
-      <main style={styles.main}>
+        <button style={styles.exitButton} onClick={sair}>↪ Sair da conta</button>
+      </aside>
+
+      <main style={styles.content}>
+        <header style={styles.header}>
+          <div>
+            <h1 style={styles.welcome}>
+              {isContador ? "Painel do Contador" : `Olá, ${empresa}`}
+            </h1>
+            <p style={styles.subWelcome}>
+              {isContador
+                ? "Gerencie clientes, documentos, boletos, CNDs e informativos."
+                : "Bem-vindo ao Portal do Cliente Pitágoras Contabilidade."}
+            </p>
+          </div>
+
+          <div style={styles.profileBox}>
+            <div style={styles.bell}>🔔</div>
+            <div style={styles.profile}>
+              <strong>{empresa}</strong>
+              <span>{isContador ? "Contador" : "Cliente"}</span>
+            </div>
+          </div>
+        </header>
+
+        <section style={styles.statsGrid}>
+          <div style={styles.statCard}>
+            <div style={styles.iconPurple}>📁</div>
+            <div>
+              <p style={styles.statLabel}>Documentos</p>
+              <h2 style={styles.statNumber}>{totalDocumentos}</h2>
+              <span style={styles.statPurple}>Total de documentos</span>
+            </div>
+          </div>
+
+          <div style={styles.statCard}>
+            <div style={styles.iconBlue}>💳</div>
+            <div>
+              <p style={styles.statLabel}>Boletos</p>
+              <h2 style={styles.statNumber}>{totalBoletos}</h2>
+              <span style={styles.statBlue}>Honorários</span>
+            </div>
+          </div>
+
+          <div style={styles.statCard}>
+            <div style={styles.iconGreen}>✅</div>
+            <div>
+              <p style={styles.statLabel}>CNDs</p>
+              <h2 style={styles.statNumber}>{totalCnds}</h2>
+              <span style={styles.statGreen}>Certidões disponíveis</span>
+            </div>
+          </div>
+
+          <div style={styles.statCard}>
+            <div style={styles.iconOrange}>⏱</div>
+            <div>
+              <p style={styles.statLabel}>Pendentes</p>
+              <h2 style={styles.statNumber}>{totalPendentes}</h2>
+              <span style={styles.statOrange}>Aguardando ação</span>
+            </div>
+          </div>
+        </section>
+
         {!isContador ? (
-          <>
-            <section style={styles.hero}>
-              <h2 style={{ margin: 0 }}>Bem-vindo ao seu portal</h2>
-              <p style={{ marginTop: 8 }}>
-                Aqui você acompanha seus boletos, CNDs, informativos e documentos enviados pelo escritório.
-              </p>
-            </section>
+          <section style={styles.mainGrid}>
+            <div style={styles.bigCard}>
+              <h2 style={styles.cardTitle}>Documentos Recebidos</h2>
 
-            <section style={styles.grid}>
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Informativos do Escritório</h3>
+              {documentosRecebidos.length === 0 ? (
+                <p style={styles.empty}>Nenhum documento recebido.</p>
+              ) : (
+                documentosRecebidos.map((item, i) => (
+                  <div key={i} style={styles.docItem}>
+                    <div>
+                      <strong>{item.nome}</strong>
+                      <p style={styles.muted}>{item.departamento}</p>
+                    </div>
+
+                    {item.caminho && (
+                      <button
+                        style={styles.downloadButton}
+                        onClick={async () => {
+                          const url = await getDownloadURL(ref(storage, item.caminho));
+                          window.open(url, "_blank");
+                        }}
+                      >
+                        Baixar
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+
+              <div style={styles.uploadBox}>
+                <h3>Enviar Documento ao Escritório</h3>
+
+                <select style={styles.input} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+                  <option>Fiscal</option>
+                  <option>Contábil</option>
+                  <option>Pessoal</option>
+                  <option>Contratos</option>
+                </select>
+
+                <input style={styles.input} type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                <button style={styles.primaryButton} onClick={enviarDocumento}>Enviar Documento</button>
+              </div>
+            </div>
+
+            <div style={styles.sideCards}>
+              <div style={styles.bigCard}>
+                <h2 style={styles.cardTitle}>Informativos</h2>
                 {informativos.length === 0 ? (
                   <p style={styles.empty}>Nenhum informativo disponível.</p>
                 ) : (
                   informativos.map((item, i) => (
-                    <div key={i} style={styles.item}>
-                      <strong>{item.nome}</strong>
-                    </div>
+                    <div key={i} style={styles.infoItem}>{item.nome}</div>
                   ))
                 )}
               </div>
 
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Boletos de Honorários</h3>
+              <div style={styles.bigCard}>
+                <h2 style={styles.cardTitle}>Boletos de Honorários</h2>
                 {boletos.length === 0 ? (
                   <p style={styles.empty}>Nenhum boleto disponível.</p>
                 ) : (
                   boletos.map((item, i) => (
-                    <div key={i} style={styles.item}>
+                    <div key={i} style={styles.docItem}>
                       <strong>{item.nome}</strong>
                       {item.caminho && (
                         <button
-                          style={styles.smallButton}
+                          style={styles.downloadButton}
                           onClick={async () => {
                             const url = await getDownloadURL(ref(storage, item.caminho));
                             window.open(url, "_blank");
@@ -316,20 +408,20 @@ export default function App() {
                 )}
               </div>
 
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>CNDs Disponíveis</h3>
+              <div style={styles.bigCard}>
+                <h2 style={styles.cardTitle}>CNDs Disponíveis</h2>
                 {cnds.length === 0 ? (
                   <p style={styles.empty}>Nenhuma CND disponível.</p>
                 ) : (
                   cnds.map((item, i) => (
-                    <div key={i} style={styles.item}>
+                    <div key={i} style={styles.docItem}>
                       <div>
                         <strong>{item.departamento}</strong>
                         <p style={styles.muted}>{item.nome}</p>
                       </div>
                       {item.caminho && (
                         <button
-                          style={styles.smallButton}
+                          style={styles.downloadButton}
                           onClick={async () => {
                             const url = await getDownloadURL(ref(storage, item.caminho));
                             window.open(url, "_blank");
@@ -342,62 +434,95 @@ export default function App() {
                   ))
                 )}
               </div>
-
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Documentos Recebidos</h3>
-                {documentosRecebidos.length === 0 ? (
-                  <p style={styles.empty}>Nenhum documento recebido.</p>
-                ) : (
-                  documentosRecebidos.map((item, i) => (
-                    <div key={i} style={styles.item}>
-                      <div>
-                        <strong>{item.nome}</strong>
-                        <p style={styles.muted}>{item.departamento}</p>
-                      </div>
-                      {item.caminho && (
-                        <button
-                          style={styles.smallButton}
-                          onClick={async () => {
-                            const url = await getDownloadURL(ref(storage, item.caminho));
-                            window.open(url, "_blank");
-                          }}
-                        >
-                          Baixar
-                        </button>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Enviar Documento ao Escritório</h3>
-
-                <select style={styles.input} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-                  <option>Fiscal</option>
-                  <option>Contábil</option>
-                  <option>Pessoal</option>
-                  <option>Contratos</option>
-                </select>
-
-                <input style={styles.input} type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-
-                <button style={styles.primaryButton} onClick={enviarDocumento}>Enviar Documento</button>
-              </div>
-            </section>
-          </>
+            </div>
+          </section>
         ) : (
-          <>
-            <section style={styles.hero}>
-              <h2 style={{ margin: 0 }}>{categoria}</h2>
-              <p style={{ marginTop: 8 }}>
-                Envie documentos, boletos, CNDs, guias e informativos para seus clientes.
-              </p>
-            </section>
+          <section style={styles.mainGrid}>
+            <div style={styles.bigCard}>
+              <h2 style={styles.cardTitle}>Enviar Documento ao Cliente</h2>
 
-            <section style={styles.grid}>
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Cadastrar Cliente</h3>
+              <select style={styles.input} value={clienteDestino} onChange={(e) => setClienteDestino(e.target.value)}>
+                <option value="">Selecione o cliente</option>
+                {clientes.map((cliente, i) => (
+                  <option key={i} value={cliente.email}>
+                    {cliente.nomeEmpresa} - {cliente.email}
+                  </option>
+                ))}
+              </select>
+
+              <select style={styles.input} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+                {categoriasContador.map((item) => (
+                  <option key={item}>{item}</option>
+                ))}
+              </select>
+
+              <input style={styles.input} type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+              <button style={styles.primaryButton} onClick={enviarDocumento}>Enviar Documento</button>
+
+              <hr style={styles.separator} />
+
+              <h2 style={styles.cardTitle}>Documentos Organizados</h2>
+
+              {clientes.map((cliente, i) => {
+                const docsCliente = documentosContador.filter((d) => d.emailCliente === cliente.email);
+                if (docsCliente.length === 0) return null;
+
+                const anos = [...new Set(docsCliente.map((d) => d.ano || "Sem ano"))];
+
+                return (
+                  <div key={i} style={styles.clientBlock}>
+                    <h3 style={styles.clientTitle}>{cliente.nomeEmpresa}</h3>
+                    <p style={styles.muted}>{cliente.email}</p>
+
+                    {anos.map((ano: any, ai: number) => {
+                      const docsAno = docsCliente.filter((d) => (d.ano || "Sem ano") === ano);
+                      const meses = [...new Set(docsAno.map((d) => d.mes || "Sem mês"))];
+
+                      return (
+                        <div key={ai} style={styles.yearBlock}>
+                          <h4 style={styles.yearTitle}>{ano}</h4>
+
+                          {meses.map((mes: any, mi: number) => {
+                            const docsMes = docsAno.filter((d) => (d.mes || "Sem mês") === mes);
+
+                            return (
+                              <div key={mi} style={styles.monthBlock}>
+                                <h5 style={styles.monthTitle}>{mes}</h5>
+
+                                {docsMes.map((item: any, di: number) => (
+                                  <div key={di} style={styles.docItem}>
+                                    <div>
+                                      <strong>{item.nome}</strong>
+                                      <p style={styles.muted}>{item.departamento}</p>
+                                    </div>
+
+                                    {item.caminho && (
+                                      <button
+                                        style={styles.downloadButton}
+                                        onClick={async () => {
+                                          const url = await getDownloadURL(ref(storage, item.caminho));
+                                          window.open(url, "_blank");
+                                        }}
+                                      >
+                                        Abrir
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={styles.sideCards}>
+              <div style={styles.bigCard}>
+                <h2 style={styles.cardTitle}>Cadastrar Cliente</h2>
 
                 <input style={styles.input} placeholder="Nome/Razão Social" value={nomeEmpresa} onChange={(e) => setNomeEmpresa(e.target.value)} />
                 <input style={styles.input} placeholder="E-mail do cliente" value={emailCliente} onChange={(e) => setEmailCliente(e.target.value)} />
@@ -406,20 +531,20 @@ export default function App() {
                 <button style={styles.primaryButton} onClick={cadastrarCliente}>Cadastrar Cliente</button>
               </div>
 
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Clientes Cadastrados</h3>
+              <div style={styles.bigCard}>
+                <h2 style={styles.cardTitle}>Clientes Cadastrados</h2>
 
                 {clientes.length === 0 ? (
                   <p style={styles.empty}>Nenhum cliente cadastrado.</p>
                 ) : (
                   clientes.map((cliente, i) => (
-                    <div key={i} style={styles.item}>
+                    <div key={i} style={styles.docItem}>
                       <div>
                         <strong>{cliente.nomeEmpresa}</strong>
                         <p style={styles.muted}>{cliente.email}</p>
                         <p style={styles.muted}>{cliente.cnpj}</p>
                       </div>
-                      <button style={styles.smallButton} onClick={() => setClienteDestino(cliente.email)}>
+                      <button style={styles.downloadButton} onClick={() => setClienteDestino(cliente.email)}>
                         Selecionar
                       </button>
                     </div>
@@ -427,115 +552,27 @@ export default function App() {
                 )}
               </div>
 
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Enviar Documento ao Cliente</h3>
+              <div style={styles.bigCard}>
+                <h2 style={styles.cardTitle}>Criar Informativo</h2>
 
                 <select style={styles.input} value={clienteDestino} onChange={(e) => setClienteDestino(e.target.value)}>
                   <option value="">Selecione o cliente</option>
                   {clientes.map((cliente, i) => (
-                    <option key={i} value={cliente.email}>
-                      {cliente.nomeEmpresa} - {cliente.email}
-                    </option>
-                  ))}
-                </select>
-
-                <select style={styles.input} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-                  {categoriasContador.map((item) => (
-                    <option key={item}>{item}</option>
-                  ))}
-                </select>
-
-                <input style={styles.input} type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-
-                <button style={styles.primaryButton} onClick={enviarDocumento}>Enviar Documento</button>
-              </div>
-
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Criar Informativo</h3>
-
-                <select style={styles.input} value={clienteDestino} onChange={(e) => setClienteDestino(e.target.value)}>
-                  <option value="">Selecione o cliente</option>
-                  {clientes.map((cliente, i) => (
-                    <option key={i} value={cliente.email}>
-                      {cliente.nomeEmpresa}
-                    </option>
+                    <option key={i} value={cliente.email}>{cliente.nomeEmpresa}</option>
                   ))}
                 </select>
 
                 <textarea
-                  style={{ ...styles.input, height: 110 }}
-                  placeholder="Digite o informativo para o cliente"
+                  style={{ ...styles.input, height: 120 }}
+                  placeholder="Digite o informativo"
                   value={informe}
                   onChange={(e) => setInforme(e.target.value)}
                 />
 
                 <button style={styles.primaryButton} onClick={enviarInforme}>Enviar Informativo</button>
               </div>
-
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Documentos Organizados</h3>
-
-                {clientes.map((cliente, i) => {
-                  const docsCliente = documentosContador.filter(
-                    (d) => d.emailCliente === cliente.email
-                  );
-
-                  if (docsCliente.length === 0) return null;
-
-                  const anos = [...new Set(docsCliente.map((d) => d.ano || "Sem ano"))];
-
-                  return (
-                    <div key={i} style={styles.clientBlock}>
-                      <h3 style={styles.clientTitle}>{cliente.nomeEmpresa}</h3>
-                      <p style={styles.muted}>{cliente.email}</p>
-
-                      {anos.map((ano: any, ai: number) => {
-                        const docsAno = docsCliente.filter((d) => (d.ano || "Sem ano") === ano);
-                        const meses = [...new Set(docsAno.map((d) => d.mes || "Sem mês"))];
-
-                        return (
-                          <div key={ai} style={styles.yearBlock}>
-                            <h4 style={styles.yearTitle}>{ano}</h4>
-
-                            {meses.map((mes: any, mi: number) => {
-                              const docsMes = docsAno.filter((d) => (d.mes || "Sem mês") === mes);
-
-                              return (
-                                <div key={mi} style={styles.monthBlock}>
-                                  <h5 style={styles.monthTitle}>{mes}</h5>
-
-                                  {docsMes.map((item: any, di: number) => (
-                                    <div key={di} style={styles.item}>
-                                      <div>
-                                        <strong>{item.nome}</strong>
-                                        <p style={styles.muted}>{item.departamento}</p>
-                                      </div>
-
-                                      {item.caminho && (
-                                        <button
-                                          style={styles.smallButton}
-                                          onClick={async () => {
-                                            const url = await getDownloadURL(ref(storage, item.caminho));
-                                            window.open(url, "_blank");
-                                          }}
-                                        >
-                                          Abrir
-                                        </button>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          </>
+            </div>
+          </section>
         )}
       </main>
     </div>
@@ -543,194 +580,379 @@ export default function App() {
 }
 
 const styles: any = {
+  page: {
+    minHeight: "100vh",
+    background: "#f8fafc",
+    display: "flex",
+    fontFamily: "Inter, Arial, sans-serif",
+    color: "#0f172a",
+  },
+
   loginPage: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #eef5ff, #ffffff)",
+    background: "#f8fafc",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
-    fontFamily: "Arial",
+    fontFamily: "Inter, Arial",
   },
+
   loginCard: {
-    width: 420,
+    width: 430,
     background: "#fff",
-    padding: 36,
+    padding: 40,
     borderRadius: 28,
     textAlign: "center",
-    boxShadow: "0 25px 70px rgba(15,61,117,.18)",
+    boxShadow: "0 20px 60px rgba(15,23,42,.10)",
+    border: "1px solid #e5e7eb",
   },
+
   loginLogo: {
-    width: 260,
+    width: 250,
     marginBottom: 20,
   },
+
   loginTitle: {
-    color: "#0f3d75",
     margin: 0,
+    fontSize: 32,
+    color: "#0f172a",
   },
+
   loginText: {
-    color: "#667085",
-    marginBottom: 25,
+    color: "#64748b",
+    marginBottom: 28,
   },
-  app: {
-    minHeight: "100vh",
-    background: "#f3f7fb",
-    fontFamily: "Arial",
-  },
-  topHeader: {
+
+  sidebar: {
+    width: 290,
     background: "#ffffff",
-    padding: "18px 34px",
+    borderRight: "1px solid #e5e7eb",
+    minHeight: "100vh",
+    padding: 24,
+    boxSizing: "border-box",
+    display: "flex",
+    flexDirection: "column",
+    position: "sticky",
+    top: 0,
+  },
+
+  logoBox: {
+    textAlign: "center",
+    marginBottom: 35,
+  },
+
+  sideLogo: {
+    width: 190,
+  },
+
+  menu: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+
+  menuItem: {
+    border: "none",
+    background: "transparent",
+    padding: "14px 16px",
+    borderRadius: 14,
+    textAlign: "left",
+    fontWeight: 600,
+    color: "#334155",
+    cursor: "pointer",
+    fontSize: 15,
+  },
+
+  menuActive: {
+    border: "none",
+    background: "linear-gradient(135deg,#ede9fe,#f3e8ff)",
+    padding: "14px 16px",
+    borderRadius: 14,
+    textAlign: "left",
+    fontWeight: 700,
+    color: "#6d28d9",
+    cursor: "pointer",
+    fontSize: 15,
+  },
+
+  exitButton: {
+    marginTop: "auto",
+    border: "none",
+    background: "transparent",
+    color: "#ef4444",
+    fontWeight: 700,
+    textAlign: "left",
+    cursor: "pointer",
+    fontSize: 15,
+  },
+
+  content: {
+    flex: 1,
+    padding: 32,
+    boxSizing: "border-box",
+  },
+
+  header: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    boxShadow: "0 8px 30px rgba(16,32,51,.08)",
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
+    marginBottom: 28,
   },
-  brandArea: {
+
+  welcome: {
+    fontSize: 34,
+    margin: 0,
+    fontWeight: 800,
+  },
+
+  subWelcome: {
+    color: "#64748b",
+    marginTop: 8,
+  },
+
+  profileBox: {
     display: "flex",
     alignItems: "center",
-    gap: 18,
+    gap: 15,
   },
-  headerLogo: {
-    width: 150,
-    maxHeight: 70,
-    objectFit: "contain",
-  },
-  title: {
-    margin: 0,
-    color: "#111827",
-  },
-  subtitle: {
-    margin: "6px 0 0",
-    color: "#667085",
-  },
-  logoutButton: {
-    border: "none",
-    borderRadius: 14,
-    padding: "11px 18px",
-    background: "#0f3d75",
-    color: "#fff",
-    fontWeight: "bold",
-    cursor: "pointer",
-  },
-  topMenu: {
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
-    padding: "18px 34px",
-    background: "#eaf2fb",
-  },
-  menuButton: {
-    border: "none",
-    borderRadius: 14,
-    padding: "11px 16px",
-    fontWeight: "bold",
-    cursor: "pointer",
-    boxShadow: "0 8px 20px rgba(16,32,51,.06)",
-  },
-  main: {
-    padding: 34,
-  },
-  hero: {
-    background: "linear-gradient(135deg, #0f3d75, #1976d2)",
-    color: "#fff",
-    padding: 30,
-    borderRadius: 28,
-    marginBottom: 24,
-    boxShadow: "0 20px 50px rgba(15,61,117,.2)",
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(340px, 1fr))",
-    gap: 22,
-  },
-  card: {
+
+  bell: {
+    width: 54,
+    height: 54,
     background: "#fff",
-    padding: 24,
-    borderRadius: 24,
-    boxShadow: "0 12px 35px rgba(16,32,51,.08)",
+    borderRadius: 16,
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    boxShadow: "0 10px 30px rgba(15,23,42,.08)",
   },
+
+  profile: {
+    background: "#fff",
+    padding: "12px 18px",
+    borderRadius: 16,
+    boxShadow: "0 10px 30px rgba(15,23,42,.08)",
+    display: "flex",
+    flexDirection: "column",
+  },
+
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 20,
+    marginBottom: 25,
+  },
+
+  statCard: {
+    background: "#fff",
+    borderRadius: 24,
+    padding: 24,
+    display: "flex",
+    alignItems: "center",
+    gap: 20,
+    boxShadow: "0 12px 35px rgba(15,23,42,.07)",
+    border: "1px solid #e5e7eb",
+  },
+
+  iconPurple: {
+    width: 62,
+    height: 62,
+    borderRadius: 22,
+    background: "#ede9fe",
+    color: "#7c3aed",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    fontSize: 28,
+  },
+
+  iconBlue: {
+    width: 62,
+    height: 62,
+    borderRadius: 22,
+    background: "#dbeafe",
+    color: "#2563eb",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    fontSize: 28,
+  },
+
+  iconGreen: {
+    width: 62,
+    height: 62,
+    borderRadius: 22,
+    background: "#dcfce7",
+    color: "#16a34a",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    fontSize: 28,
+  },
+
+  iconOrange: {
+    width: 62,
+    height: 62,
+    borderRadius: 22,
+    background: "#ffedd5",
+    color: "#f97316",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    fontSize: 28,
+  },
+
+  statLabel: {
+    margin: 0,
+    color: "#475569",
+  },
+
+  statNumber: {
+    fontSize: 32,
+    margin: "4px 0",
+  },
+
+  statPurple: { color: "#7c3aed", fontSize: 13 },
+  statBlue: { color: "#2563eb", fontSize: 13 },
+  statGreen: { color: "#16a34a", fontSize: 13 },
+  statOrange: { color: "#f97316", fontSize: 13 },
+
+  mainGrid: {
+    display: "grid",
+    gridTemplateColumns: "1.4fr .9fr",
+    gap: 24,
+  },
+
+  sideCards: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 24,
+  },
+
+  bigCard: {
+    background: "#fff",
+    borderRadius: 24,
+    padding: 24,
+    boxShadow: "0 12px 35px rgba(15,23,42,.07)",
+    border: "1px solid #e5e7eb",
+  },
+
   cardTitle: {
     marginTop: 0,
-    color: "#111827",
+    fontSize: 22,
+    fontWeight: 800,
   },
+
   input: {
     width: "100%",
     padding: "14px 15px",
     marginBottom: 14,
     borderRadius: 14,
-    border: "1px solid #d9e3ef",
+    border: "1px solid #dbe4ee",
     fontSize: 15,
     boxSizing: "border-box",
+    outline: "none",
     background: "#fff",
   },
+
   primaryButton: {
     width: "100%",
-    padding: 14,
+    padding: 15,
     border: "none",
     borderRadius: 14,
-    background: "#0f3d75",
+    background: "#7c3aed",
     color: "#fff",
-    fontWeight: "bold",
+    fontWeight: 700,
     cursor: "pointer",
   },
-  smallButton: {
-    border: "none",
+
+  downloadButton: {
+    border: "1px solid #ddd6fe",
     borderRadius: 12,
     padding: "9px 14px",
-    background: "#0f3d75",
-    color: "#fff",
+    background: "#fff",
+    color: "#7c3aed",
+    fontWeight: 700,
     cursor: "pointer",
   },
-  item: {
-    background: "#f8fbff",
-    border: "1px solid #edf2f7",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
+
+  docItem: {
+    background: "#fff",
+    borderBottom: "1px solid #eef2f7",
+    padding: "15px 0",
     display: "flex",
     justifyContent: "space-between",
-    gap: 15,
     alignItems: "center",
+    gap: 15,
   },
+
+  uploadBox: {
+    marginTop: 25,
+    padding: 22,
+    borderRadius: 20,
+    border: "2px dashed #c4b5fd",
+    background: "#faf5ff",
+  },
+
+  infoItem: {
+    background: "#faf5ff",
+    color: "#4c1d95",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+    fontWeight: 600,
+  },
+
   muted: {
     margin: 0,
-    color: "#667085",
+    color: "#64748b",
     fontSize: 13,
   },
+
   empty: {
-    background: "#f8fbff",
-    color: "#667085",
-    padding: 15,
-    borderRadius: 14,
+    background: "#f8fafc",
+    color: "#64748b",
+    padding: 16,
+    borderRadius: 16,
   },
+
+  separator: {
+    border: "none",
+    borderTop: "1px solid #e5e7eb",
+    margin: "28px 0",
+  },
+
   clientBlock: {
-    background: "#f8fbff",
-    border: "1px solid #edf2f7",
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
     borderRadius: 18,
     padding: 16,
     marginBottom: 16,
   },
+
   clientTitle: {
     margin: "0 0 4px",
-    color: "#0f3d75",
+    color: "#6d28d9",
   },
+
   yearBlock: {
     marginLeft: 12,
     marginTop: 12,
   },
+
   yearTitle: {
-    color: "#1976d2",
+    color: "#2563eb",
     marginBottom: 10,
   },
+
   monthBlock: {
     marginLeft: 14,
     marginBottom: 14,
   },
+
   monthTitle: {
     textTransform: "capitalize",
-    color: "#444",
+    color: "#334155",
     marginBottom: 10,
   },
 };
