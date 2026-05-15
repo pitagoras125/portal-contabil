@@ -1,29 +1,53 @@
 const { onRequest } = require("firebase-functions/v2/https");
-const cors = require("cors")({ origin: true });
-const { Resend } = require("resend");
+const admin = require("firebase-admin");
+const axios = require("axios");
 
-const resend = new Resend("re_FKwHjZyR_CRVVWwcDgYpFGwdCvFviyH9iI");
+admin.initializeApp();
 
-exports.enviarEmail = onRequest(async (req, res) => {
-  cors(req, res, async () => {
-    try {
-      const { email, nome, arquivo } = req.body || {};
+// Definimos a função usando a v2 e injetamos o segredo
+exports.criarBoletoAsaas = onRequest({ secrets: ["ASAAS_API_KEY"], cors: true }, async (req, res) => {
+  try {
+    const { nome, email, cpfCnpj, valor, vencimento, descricao } = req.body;
+    
+    // Na v2, o segredo fica disponível diretamente em process.env
+    const ASAAS_API_KEY = process.env.ASAAS_API_KEY;
 
-      await resend.emails.send({
-        from: "onboarding@resend.dev",
-        to: email || "wesleytenesv@gmail.com",
-        subject: "Novo documento recebido",
-        html: `
-          <h2>Novo documento recebido</h2>
-          <p><b>Cliente:</b> ${nome || "Não informado"}</p>
-          <p><b>Arquivo:</b> ${arquivo || "Não informado"}</p>
-        `,
-      });
-
-      res.status(200).send("Email enviado com sucesso!");
-    } catch (error) {
-      console.error(error);
-      res.status(500).send("Erro ao enviar email");
+    if (!ASAAS_API_KEY) {
+      return res.status(500).send({ sucesso: false, mensagem: "Chave API não configurada." });
     }
-  });
+
+    // 1. Criar cliente no Asaas
+    const clienteResponse = await axios.post(
+      "https://sandbox.asaas.com/api/v3/customers",
+      { name: nome, email, cpfCnpj },
+      { headers: { access_token: ASAAS_API_KEY, "Content-Type": "application/json" } }
+    );
+
+    // 2. Gerar o boleto
+    const boletoResponse = await axios.post(
+      "https://sandbox.asaas.com/api/v3/payments",
+      {
+        customer: clienteResponse.data.id,
+        billingType: "BOLETO",
+        value: Number(valor),
+        dueDate: vencimento,
+        description: descricao,
+      },
+      { headers: { access_token: ASAAS_API_KEY, "Content-Type": "application/json" } }
+    );
+
+    res.status(200).send({
+      sucesso: true,
+      id: boletoResponse.data.id,
+      boleto: boletoResponse.data.bankSlipUrl,
+      invoiceUrl: boletoResponse.data.invoiceUrl,
+    });
+
+  } catch (erro) {
+    console.error("Erro detalhado:", erro.response?.data || erro.message);
+    res.status(500).send({
+      sucesso: false,
+      erro: erro.response?.data || erro.message,
+    });
+  }
 });

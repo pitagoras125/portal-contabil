@@ -1,0 +1,13 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isContador() {
+      return request.auth != null && request.auth.token.email == "contato@pitagorascontabilidade.com.br";
+    }
+
+    match /clientes/{emailCliente}/{allPaths=**} {
+      allow read, write: if isContador() || (request.auth != null && request.auth.token.email == emailCliente);
+    }
+  }
+}
