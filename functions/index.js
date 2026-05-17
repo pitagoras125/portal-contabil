@@ -51,3 +51,69 @@ exports.criarBoletoAsaas = onRequest({ secrets: ["ASAAS_API_KEY"], cors: true },
     });
   }
 });
+// ======================================================
+// CRIAR CLIENTE COM SENHA
+// ======================================================
+
+exports.criarClienteComSenha = onRequest({ cors: true }, async (req, res) => {
+  try {
+    const { nomeEmpresa, email, senha, cnpj } = req.body;
+
+    if (!nomeEmpresa || !email || !senha) {
+      return res.status(400).send({
+        sucesso: false,
+        erro: "Informe nome da empresa, e-mail e senha.",
+      });
+    }
+
+    if (String(senha).length < 6) {
+      return res.status(400).send({
+        sucesso: false,
+        erro: "A senha precisa ter no mínimo 6 caracteres.",
+      });
+    }
+
+    let usuario;
+
+    try {
+      usuario = await admin.auth().createUser({
+        email,
+        password: senha,
+        displayName: nomeEmpresa,
+        disabled: false,
+      });
+    } catch (erroAuth) {
+      if (erroAuth.code === "auth/email-already-exists") {
+        usuario = await admin.auth().getUserByEmail(email);
+      } else {
+        throw erroAuth;
+      }
+    }
+
+    await admin.firestore().collection("clientes").doc(usuario.uid).set(
+      {
+        uid: usuario.uid,
+        nomeEmpresa,
+        email,
+        cnpj: cnpj || "",
+        criadoEm: new Date(),
+        ativo: true,
+        tipoUsuario: "cliente",
+      },
+      { merge: true }
+    );
+
+    return res.status(200).send({
+      sucesso: true,
+      uid: usuario.uid,
+      mensagem: "Cliente criado com login e senha.",
+    });
+  } catch (erro) {
+    console.error("Erro ao criar cliente:", erro);
+
+    return res.status(500).send({
+      sucesso: false,
+      erro: erro.message || "Erro ao criar cliente.",
+    });
+  }
+});

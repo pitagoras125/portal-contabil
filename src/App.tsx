@@ -9,6 +9,7 @@ const EMAIL_CONTADOR = "contato@pitagorascontabilidade.com.br";
 const EMAIL_AVISO_CONTADOR = "wesleytenesv@gmail.com";
 const URL_EMAIL = "https://enviaremail-aa5vnrgdoa-uc.a.run.app";
 const URL_BOLETO_ASAAS = "https://us-central1-portal-contabil-4c418.cloudfunctions.net/criarBoletoAsaas";
+const URL_CRIAR_CLIENTE = "https://us-central1-portal-contabil-4c418.cloudfunctions.net/criarClienteComSenha";
 
 const categoriasContador = [
   "Guias e Impostos",
@@ -24,6 +25,7 @@ const categoriasContador = [
 ];
 
 type SecaoCliente = "documentos" | "boletos" | "cnds" | "informativos" | "envio";
+type PaginaContador = "dashboard" | "clientes" | "documentos" | "integra" | "notas" | "assinaturas" | "configuracoes";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -37,6 +39,9 @@ export default function App() {
   const [nomeEmpresa, setNomeEmpresa] = useState("");
   const [emailCliente, setEmailCliente] = useState("");
   const [cnpjCliente, setCnpjCliente] = useState("");
+  const [senhaCliente, setSenhaCliente] = useState("");
+  const [confirmarSenhaCliente, setConfirmarSenhaCliente] = useState("");
+  const [criandoCliente, setCriandoCliente] = useState(false);
 
   const [clienteDestino, setClienteDestino] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -55,6 +60,7 @@ export default function App() {
   const [emitindoBoleto, setEmitindoBoleto] = useState(false);
 
   const [secaoCliente, setSecaoCliente] = useState<SecaoCliente>("documentos");
+  const [paginaContador, setPaginaContador] = useState<PaginaContador>("dashboard");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (usuario) => {
@@ -161,23 +167,61 @@ export default function App() {
   }
 
   async function cadastrarCliente() {
-    if (!nomeEmpresa || !emailCliente) {
-      alert("Informe nome da empresa e e-mail.");
-      return;
+    try {
+      if (!nomeEmpresa || !emailCliente || !senhaCliente) {
+        alert("Informe nome da empresa, e-mail e senha.");
+        return;
+      }
+
+      if (senhaCliente !== confirmarSenhaCliente) {
+        alert("As senhas não conferem.");
+        return;
+      }
+
+      if (senhaCliente.length < 6) {
+        alert("A senha precisa ter no mínimo 6 caracteres.");
+        return;
+      }
+
+      setCriandoCliente(true);
+
+      const resposta = await fetch(URL_CRIAR_CLIENTE, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nomeEmpresa,
+          email: emailCliente,
+          cnpj: cnpjCliente,
+          senha: senhaCliente,
+        }),
+      });
+
+      const dados = await resposta.json();
+
+      if (!resposta.ok || !dados.sucesso) {
+        console.error(dados);
+        alert(dados.erro || "Erro ao criar cliente.");
+        setCriandoCliente(false);
+        return;
+      }
+
+      alert("Cliente cadastrado com login e senha!");
+
+      setNomeEmpresa("");
+      setEmailCliente("");
+      setCnpjCliente("");
+      setSenhaCliente("");
+      setConfirmarSenhaCliente("");
+      setCriandoCliente(false);
+
+      await carregarDados();
+    } catch (erro: any) {
+      console.error(erro);
+      alert("Erro ao cadastrar cliente.");
+      setCriandoCliente(false);
     }
-
-    await addDoc(collection(db, "clientes"), {
-      nomeEmpresa,
-      email: emailCliente,
-      cnpj: cnpjCliente,
-      criadoEm: new Date(),
-    });
-
-    alert("Cliente cadastrado com sucesso!");
-    setNomeEmpresa("");
-    setEmailCliente("");
-    setCnpjCliente("");
-    await carregarDados();
   }
 
   async function enviarDocumento() {
@@ -632,6 +676,372 @@ export default function App() {
     );
   }
 
+
+  function renderPainelContador() {
+    if (paginaContador === "dashboard") {
+      return (
+        <>
+          <section style={styles.adminHero}>
+            <div>
+              <p style={styles.clientLabel}>Painel administrativo web</p>
+              <h2 style={styles.clientHeroTitle}>Controle do Escritório</h2>
+              <p style={styles.clientHeroText}>
+                Visão geral dos clientes, documentos, avisos, buscas fiscais e integrações do portal.
+              </p>
+            </div>
+
+            <div style={styles.adminHeroActions}>
+              <button style={styles.primaryButton} onClick={() => setPaginaContador("clientes")}>
+                + Novo Cliente
+              </button>
+              <button style={styles.secondaryButton} onClick={() => setPaginaContador("documentos")}>
+                Enviar Documento
+              </button>
+            </div>
+          </section>
+
+          <section style={styles.statsGrid}>
+            <div style={styles.statCard}>
+              <div style={styles.iconPurple}>👥</div>
+              <div>
+                <p style={styles.statLabel}>Clientes</p>
+                <h2 style={styles.statNumber}>{clientes.length}</h2>
+                <span style={styles.statPurple}>Clientes cadastrados</span>
+              </div>
+            </div>
+
+            <div style={styles.statCard}>
+              <div style={styles.iconBlue}>📁</div>
+              <div>
+                <p style={styles.statLabel}>Documentos</p>
+                <h2 style={styles.statNumber}>{totalDocumentos}</h2>
+                <span style={styles.statBlue}>Arquivos no portal</span>
+              </div>
+            </div>
+
+            <div style={styles.statCard}>
+              <div style={styles.iconGreen}>💳</div>
+              <div>
+                <p style={styles.statLabel}>Boletos</p>
+                <h2 style={styles.statNumber}>{totalBoletos}</h2>
+                <span style={styles.statGreen}>Honorários</span>
+              </div>
+            </div>
+
+            <div style={styles.statCard}>
+              <div style={styles.iconOrange}>🔔</div>
+              <div>
+                <p style={styles.statLabel}>Avisos</p>
+                <h2 style={styles.statNumber}>{notificacoes.length}</h2>
+                <span style={styles.statOrange}>Notificações internas</span>
+              </div>
+            </div>
+          </section>
+
+          <section style={styles.adminGrid}>
+            <div style={styles.bigCard}>
+              <h2 style={styles.cardTitle}>Atalhos Operacionais</h2>
+
+              <div style={styles.adminShortcutGrid}>
+                <button style={styles.adminShortcut} onClick={() => setPaginaContador("clientes")}>
+                  <span>👥</span>
+                  <strong>Clientes</strong>
+                  <small>Cadastro, senha e dados fiscais</small>
+                </button>
+
+                <button style={styles.adminShortcut} onClick={() => setPaginaContador("documentos")}>
+                  <span>📁</span>
+                  <strong>Documentos</strong>
+                  <small>Fiscal, contábil, pessoal e contratos</small>
+                </button>
+
+                <button style={styles.adminShortcut} onClick={() => setPaginaContador("integra")}>
+                  <span>🧾</span>
+                  <strong>Integra Contador</strong>
+                  <small>MEI e Simples Nacional</small>
+                </button>
+
+                <button style={styles.adminShortcut} onClick={() => setPaginaContador("notas")}>
+                  <span>🔎</span>
+                  <strong>Buscador de Notas</strong>
+                  <small>XML, PDF, Drive e rotina automática</small>
+                </button>
+
+                <button style={styles.adminShortcut} onClick={() => setPaginaContador("assinaturas")}>
+                  <span>✍️</span>
+                  <strong>Assinaturas</strong>
+                  <small>Certificado digital e gov.br</small>
+                </button>
+              </div>
+            </div>
+
+            <NotificacoesCard />
+          </section>
+        </>
+      );
+    }
+
+    if (paginaContador === "clientes") {
+      return (
+        <section style={styles.adminGrid}>
+          <div style={styles.bigCard}>
+            <h2 style={styles.cardTitle}>Cadastrar Cliente</h2>
+            <p style={styles.muted}>
+              Próxima função: criar o login automaticamente no Firebase Authentication com e-mail e senha.
+            </p>
+
+            <input style={styles.input} placeholder="Nome/Razão Social" value={nomeEmpresa} onChange={(e) => setNomeEmpresa(e.target.value)} />
+            <input style={styles.input} placeholder="CNPJ/CPF" value={cnpjCliente} onChange={(e) => setCnpjCliente(e.target.value)} />
+            <input style={styles.input} placeholder="E-mail do cliente" value={emailCliente} onChange={(e) => setEmailCliente(e.target.value)} />
+            <input style={styles.input} type="password" placeholder="Senha de acesso do cliente" value={senhaCliente} onChange={(e) => setSenhaCliente(e.target.value)} />
+            <input style={styles.input} type="password" placeholder="Confirmar senha" value={confirmarSenhaCliente} onChange={(e) => setConfirmarSenhaCliente(e.target.value)} />
+
+            <button style={styles.primaryButton} onClick={cadastrarCliente} disabled={criandoCliente}>
+              {criandoCliente ? "Criando cliente..." : "Cadastrar Cliente"}
+            </button>
+          </div>
+
+          <div style={styles.bigCard}>
+            <h2 style={styles.cardTitle}>Clientes Cadastrados</h2>
+
+            {clientes.length === 0 ? (
+              <p style={styles.empty}>Nenhum cliente cadastrado.</p>
+            ) : (
+              clientes.map((cliente, i) => (
+                <div key={i} style={styles.docItem}>
+                  <div>
+                    <strong>{cliente.nomeEmpresa}</strong>
+                    <p style={styles.muted}>{cliente.email}</p>
+                    <p style={styles.muted}>{cliente.cnpj}</p>
+                  </div>
+                  <button style={styles.downloadButton} onClick={() => setClienteDestino(cliente.email)}>
+                    Selecionar
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      );
+    }
+
+    if (paginaContador === "documentos") {
+      return (
+        <section style={styles.mainGrid}>
+          <div style={styles.bigCard}>
+            <h2 style={styles.cardTitle}>Enviar Documento ao Cliente</h2>
+
+            <select style={styles.input} value={clienteDestino} onChange={(e) => setClienteDestino(e.target.value)}>
+              <option value="">Selecione o cliente</option>
+              {clientes.map((cliente, i) => (
+                <option key={i} value={cliente.email}>
+                  {cliente.nomeEmpresa} - {cliente.email}
+                </option>
+              ))}
+            </select>
+
+            <select style={styles.input} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+              {categoriasContador.map((item) => (
+                <option key={item}>{item}</option>
+              ))}
+            </select>
+
+            <input style={styles.input} type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+
+            <button style={styles.primaryButton} onClick={enviarDocumento} disabled={enviando}>
+              {enviando ? `Enviando ${uploadProgress}%` : "Enviar Documento"}
+            </button>
+
+            {enviando && (
+              <div style={styles.loadingBar}>
+                <div style={{ ...styles.loadingProgress, width: `${uploadProgress}%` }} />
+              </div>
+            )}
+
+            <hr style={styles.separator} />
+
+            <h2 style={styles.cardTitle}>Documentos Organizados</h2>
+
+            <input style={styles.input} placeholder="Pesquisar documento..." value={busca} onChange={(e) => setBusca(e.target.value)} />
+
+            <select style={styles.input} value={filtroCliente} onChange={(e) => setFiltroCliente(e.target.value)}>
+              <option value="">Todos os clientes</option>
+              {clientes.map((cliente, i) => (
+                <option key={i} value={cliente.email}>{cliente.nomeEmpresa}</option>
+              ))}
+            </select>
+
+            {clientes.map((cliente, i) => {
+              const docsCliente = documentosContador.filter((d) => d.emailCliente === cliente.email);
+              if (docsCliente.length === 0) return null;
+
+              const anos = [...new Set(docsCliente.map((d) => d.ano || "Sem ano"))];
+
+              return (
+                <div key={i} style={styles.clientBlock}>
+                  <h3 style={styles.clientTitle}>{cliente.nomeEmpresa}</h3>
+                  <p style={styles.muted}>{cliente.email}</p>
+
+                  {anos.map((ano: any, ai: number) => {
+                    const docsAno = docsCliente.filter((d) => (d.ano || "Sem ano") === ano);
+                    const meses = [...new Set(docsAno.map((d) => d.mes || "Sem mês"))];
+
+                    return (
+                      <div key={ai} style={styles.yearBlock}>
+                        <h4 style={styles.yearTitle}>{ano}</h4>
+                        {meses.map((mes: any, mi: number) => {
+                          const docsMes = docsAno.filter((d) => (d.mes || "Sem mês") === mes);
+
+                          return (
+                            <div key={mi} style={styles.monthBlock}>
+                              <h5 style={styles.monthTitle}>{mes}</h5>
+
+                              {docsMes.map((item: any, di: number) => (
+                                <div key={di} style={styles.docItem}>
+                                  <div>
+                                    <strong>{item.nome}</strong>
+                                    <p style={styles.muted}>{item.departamento}</p>
+                                    {item.valor && <p style={styles.muted}>R$ {item.valor}</p>}
+                                    {item.vencimento && <p style={styles.muted}>Vencimento: {item.vencimento}</p>}
+                                  </div>
+
+                                  {(item.caminho || item.boletoUrl || item.invoiceUrl) && (
+                                    <button style={styles.downloadButton} onClick={() => abrirDocumentoOuLink(item)}>
+                                      Abrir
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={styles.sideCards}>
+            <NotificacoesCard />
+
+            <div style={styles.bigCard}>
+              <h2 style={styles.cardTitle}>Criar Informativo</h2>
+
+              <select style={styles.input} value={clienteDestino} onChange={(e) => setClienteDestino(e.target.value)}>
+                <option value="">Selecione o cliente</option>
+                {clientes.map((cliente, i) => (
+                  <option key={i} value={cliente.email}>{cliente.nomeEmpresa}</option>
+                ))}
+              </select>
+
+              <textarea
+                style={{ ...styles.input, height: 120 }}
+                placeholder="Digite o informativo"
+                value={informe}
+                onChange={(e) => setInforme(e.target.value)}
+              />
+
+              <button style={styles.primaryButton} onClick={enviarInforme}>
+                Enviar Informativo
+              </button>
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    if (paginaContador === "integra") {
+      return (
+        <section style={styles.moduleGrid}>
+          <div style={styles.bigCard}>
+            <p style={styles.clientLabel}>Integra Contador</p>
+            <h2 style={styles.cardTitle}>MEI</h2>
+            <p style={styles.muted}>Área preparada para DAS MEI, parcelamentos, situação fiscal e pendências.</p>
+            <button style={styles.secondaryButton}>Configurar Token do Cliente</button>
+          </div>
+
+          <div style={styles.bigCard}>
+            <p style={styles.clientLabel}>Integra Contador</p>
+            <h2 style={styles.cardTitle}>Simples Nacional</h2>
+            <p style={styles.muted}>Área preparada para DAS, débitos, parcelamentos, PGDAS e consultas.</p>
+            <button style={styles.secondaryButton}>Abrir Módulo Simples</button>
+          </div>
+        </section>
+      );
+    }
+
+    if (paginaContador === "notas") {
+      return (
+        <section style={styles.moduleGrid}>
+          <div style={styles.bigCard}>
+            <p style={styles.clientLabel}>Buscador automático</p>
+            <h2 style={styles.cardTitle}>Notas Fiscais</h2>
+            <p style={styles.muted}>
+              Rotina programada para buscar NF-e, NFC-e, CT-e, NFS-e e cupons fiscais às 12:00 e 21:00.
+            </p>
+
+            <div style={styles.configLine}><strong>Horários:</strong><span>12:00 e 21:00</span></div>
+            <div style={styles.configLine}><strong>Armazenamento:</strong><span>Google Drive por cliente, ano e mês</span></div>
+            <div style={styles.configLine}><strong>Formatos:</strong><span>XML e PDF/DANFE</span></div>
+          </div>
+
+          <div style={styles.bigCard}>
+            <h2 style={styles.cardTitle}>Google Drive</h2>
+            <p style={styles.muted}>Estrutura planejada: Cliente → Ano → Mês → Modelo da Nota.</p>
+            <button style={styles.secondaryButton}>Conectar Google Drive</button>
+          </div>
+        </section>
+      );
+    }
+
+    if (paginaContador === "assinaturas") {
+      return (
+        <section style={styles.moduleGrid}>
+          <div style={styles.bigCard}>
+            <p style={styles.clientLabel}>Assinaturas digitais</p>
+            <h2 style={styles.cardTitle}>Enviar documento para assinatura</h2>
+
+            <select style={styles.input}>
+              <option>Selecione o cliente</option>
+              {clientes.map((cliente, i) => (
+                <option key={i}>{cliente.nomeEmpresa}</option>
+              ))}
+            </select>
+
+            <input style={styles.input} type="file" />
+            <button style={styles.primaryButton}>Preparar assinatura</button>
+          </div>
+
+          <div style={styles.bigCard}>
+            <h2 style={styles.cardTitle}>Certificado e gov.br</h2>
+            <p style={styles.muted}>
+              Espaço reservado para certificado A1, assinatura do contador, assinatura do cliente e integração gov.br.
+            </p>
+            <input style={styles.input} type="file" />
+            <button style={styles.secondaryButton}>Salvar Certificado</button>
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <section style={styles.moduleGrid}>
+        <div style={styles.bigCard}>
+          <h2 style={styles.cardTitle}>Configurações</h2>
+          <p style={styles.muted}>Ambiente para parâmetros do escritório, APIs, tokens, e-mail, Drive e automações.</p>
+        </div>
+
+        <div style={styles.bigCard}>
+          <h2 style={styles.cardTitle}>Segurança Multi Cliente</h2>
+          <p style={styles.muted}>Regra principal: cada cliente só visualiza os próprios documentos, boletos e assinaturas.</p>
+        </div>
+      </section>
+    );
+  }
+
+
   return (
     <div style={styles.page}>
       <aside style={styles.sidebar}>
@@ -640,18 +1050,19 @@ export default function App() {
         </div>
 
         <div style={styles.menu}>
-          <button style={styles.menuActive}>🏠 Dashboard</button>
-
-          {isContador &&
-            categoriasContador.map((item) => (
-              <button
-                key={item}
-                onClick={() => setCategoria(item)}
-                style={categoria === item ? styles.menuActive : styles.menuItem}
-              >
-                📁 {item}
-              </button>
-            ))}
+          {isContador ? (
+            <>
+              <button onClick={() => setPaginaContador("dashboard")} style={paginaContador === "dashboard" ? styles.menuActive : styles.menuItem}>🏠 Dashboard</button>
+              <button onClick={() => setPaginaContador("clientes")} style={paginaContador === "clientes" ? styles.menuActive : styles.menuItem}>👥 Clientes</button>
+              <button onClick={() => setPaginaContador("documentos")} style={paginaContador === "documentos" ? styles.menuActive : styles.menuItem}>📁 Documentos</button>
+              <button onClick={() => setPaginaContador("integra")} style={paginaContador === "integra" ? styles.menuActive : styles.menuItem}>🧾 Integra Contador</button>
+              <button onClick={() => setPaginaContador("notas")} style={paginaContador === "notas" ? styles.menuActive : styles.menuItem}>🔎 Buscador de Notas</button>
+              <button onClick={() => setPaginaContador("assinaturas")} style={paginaContador === "assinaturas" ? styles.menuActive : styles.menuItem}>✍️ Assinaturas</button>
+              <button onClick={() => setPaginaContador("configuracoes")} style={paginaContador === "configuracoes" ? styles.menuActive : styles.menuItem}>⚙️ Configurações</button>
+            </>
+          ) : (
+            <button style={styles.menuActive}>🏠 Portal do Cliente</button>
+          )}
         </div>
 
         <button style={styles.exitButton} onClick={sair}>
@@ -687,267 +1098,7 @@ export default function App() {
         </header>
 
         {isContador ? (
-          <>
-            <section style={styles.statsGrid}>
-              <div style={styles.statCard}>
-                <div style={styles.iconPurple}>📁</div>
-                <div>
-                  <p style={styles.statLabel}>Documentos</p>
-                  <h2 style={styles.statNumber}>{totalDocumentos}</h2>
-                  <span style={styles.statPurple}>Total de documentos</span>
-                </div>
-              </div>
-
-              <div style={styles.statCard}>
-                <div style={styles.iconBlue}>💳</div>
-                <div>
-                  <p style={styles.statLabel}>Boletos</p>
-                  <h2 style={styles.statNumber}>{totalBoletos}</h2>
-                  <span style={styles.statBlue}>Honorários</span>
-                </div>
-              </div>
-
-              <div style={styles.statCard}>
-                <div style={styles.iconGreen}>✅</div>
-                <div>
-                  <p style={styles.statLabel}>CNDs</p>
-                  <h2 style={styles.statNumber}>{totalCnds}</h2>
-                  <span style={styles.statGreen}>Certidões disponíveis</span>
-                </div>
-              </div>
-
-              <div style={styles.statCard}>
-                <div style={styles.iconOrange}>⏱</div>
-                <div>
-                  <p style={styles.statLabel}>Pendentes</p>
-                  <h2 style={styles.statNumber}>{totalPendentes}</h2>
-                  <span style={styles.statOrange}>Aguardando ação</span>
-                </div>
-              </div>
-            </section>
-
-            <section style={styles.mainGrid}>
-              <div style={styles.bigCard}>
-                <h2 style={styles.cardTitle}>Enviar Documento ao Cliente</h2>
-
-                <select style={styles.input} value={clienteDestino} onChange={(e) => setClienteDestino(e.target.value)}>
-                  <option value="">Selecione o cliente</option>
-                  {clientes.map((cliente, i) => (
-                    <option key={i} value={cliente.email}>
-                      {cliente.nomeEmpresa} - {cliente.email}
-                    </option>
-                  ))}
-                </select>
-
-                <select style={styles.input} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-                  {categoriasContador.map((item) => (
-                    <option key={item}>{item}</option>
-                  ))}
-                </select>
-
-                <input style={styles.input} type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-
-                <button style={styles.primaryButton} onClick={enviarDocumento} disabled={enviando}>
-                  {enviando ? `Enviando ${uploadProgress}%` : "Enviar Documento"}
-                </button>
-
-                {enviando && (
-                  <div style={styles.loadingBar}>
-                    <div style={{ ...styles.loadingProgress, width: `${uploadProgress}%` }} />
-                  </div>
-                )}
-
-                <hr style={styles.separator} />
-
-                <h2 style={styles.cardTitle}>Documentos Organizados</h2>
-
-                <input
-                  style={styles.input}
-                  placeholder="Pesquisar documento..."
-                  value={busca}
-                  onChange={(e) => setBusca(e.target.value)}
-                />
-
-                <select style={styles.input} value={filtroCliente} onChange={(e) => setFiltroCliente(e.target.value)}>
-                  <option value="">Todos os clientes</option>
-                  {clientes.map((cliente, i) => (
-                    <option key={i} value={cliente.email}>
-                      {cliente.nomeEmpresa}
-                    </option>
-                  ))}
-                </select>
-
-                {clientes.map((cliente, i) => {
-                  const docsCliente = documentosContador.filter((d) => d.emailCliente === cliente.email);
-                  if (docsCliente.length === 0) return null;
-
-                  const anos = [...new Set(docsCliente.map((d) => d.ano || "Sem ano"))];
-
-                  return (
-                    <div key={i} style={styles.clientBlock}>
-                      <h3 style={styles.clientTitle}>{cliente.nomeEmpresa}</h3>
-                      <p style={styles.muted}>{cliente.email}</p>
-
-                      {anos.map((ano: any, ai: number) => {
-                        const docsAno = docsCliente.filter((d) => (d.ano || "Sem ano") === ano);
-                        const meses = [...new Set(docsAno.map((d) => d.mes || "Sem mês"))];
-
-                        return (
-                          <div key={ai} style={styles.yearBlock}>
-                            <h4 style={styles.yearTitle}>{ano}</h4>
-
-                            {meses.map((mes: any, mi: number) => {
-                              const docsMes = docsAno.filter((d) => (d.mes || "Sem mês") === mes);
-
-                              return (
-                                <div key={mi} style={styles.monthBlock}>
-                                  <h5 style={styles.monthTitle}>{mes}</h5>
-
-                                  {docsMes.map((item: any, di: number) => (
-                                    <div key={di} style={styles.docItem}>
-                                      <div>
-                                        <strong>{item.nome}</strong>
-                                        <p style={styles.muted}>{item.departamento}</p>
-                                        {item.valor && <p style={styles.muted}>R$ {item.valor}</p>}
-                                        {item.vencimento && <p style={styles.muted}>Vencimento: {item.vencimento}</p>}
-                                      </div>
-
-                                      {(item.caminho || item.boletoUrl || item.invoiceUrl) && (
-                                        <button style={styles.downloadButton} onClick={() => abrirDocumentoOuLink(item)}>
-                                          Abrir
-                                        </button>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div style={styles.sideCards}>
-                <NotificacoesCard />
-
-                <div style={styles.bigCard}>
-                  <h2 style={styles.cardTitle}>Emitir Boleto Asaas</h2>
-
-                  <select style={styles.input} value={clienteDestino} onChange={(e) => setClienteDestino(e.target.value)}>
-                    <option value="">Selecione o cliente</option>
-                    {clientes.map((cliente, i) => (
-                      <option key={i} value={cliente.email}>
-                        {cliente.nomeEmpresa}
-                      </option>
-                    ))}
-                  </select>
-
-                  <input
-                    style={styles.input}
-                    placeholder="Valor do boleto. Ex: 150,00"
-                    value={valorBoleto}
-                    onChange={(e) => setValorBoleto(e.target.value)}
-                  />
-
-                  <input
-                    style={styles.input}
-                    type="date"
-                    value={vencimentoBoleto}
-                    onChange={(e) => setVencimentoBoleto(e.target.value)}
-                  />
-
-                  <textarea
-                    style={{ ...styles.input, height: 90 }}
-                    placeholder="Descrição do boleto"
-                    value={descricaoBoleto}
-                    onChange={(e) => setDescricaoBoleto(e.target.value)}
-                  />
-
-                  <button style={styles.primaryButton} onClick={emitirBoletoAsaas} disabled={emitindoBoleto}>
-                    {emitindoBoleto ? "Emitindo boleto..." : "Emitir Boleto"}
-                  </button>
-                </div>
-
-                <div style={styles.bigCard}>
-                  <h2 style={styles.cardTitle}>Cadastrar Cliente</h2>
-
-                  <input
-                    style={styles.input}
-                    placeholder="Nome/Razão Social"
-                    value={nomeEmpresa}
-                    onChange={(e) => setNomeEmpresa(e.target.value)}
-                  />
-
-                  <input
-                    style={styles.input}
-                    placeholder="E-mail do cliente"
-                    value={emailCliente}
-                    onChange={(e) => setEmailCliente(e.target.value)}
-                  />
-
-                  <input
-                    style={styles.input}
-                    placeholder="CNPJ/CPF"
-                    value={cnpjCliente}
-                    onChange={(e) => setCnpjCliente(e.target.value)}
-                  />
-
-                  <button style={styles.primaryButton} onClick={cadastrarCliente}>
-                    Cadastrar Cliente
-                  </button>
-                </div>
-
-                <div style={styles.bigCard}>
-                  <h2 style={styles.cardTitle}>Clientes Cadastrados</h2>
-
-                  {clientes.length === 0 ? (
-                    <p style={styles.empty}>Nenhum cliente cadastrado.</p>
-                  ) : (
-                    clientes.map((cliente, i) => (
-                      <div key={i} style={styles.docItem}>
-                        <div>
-                          <strong>{cliente.nomeEmpresa}</strong>
-                          <p style={styles.muted}>{cliente.email}</p>
-                          <p style={styles.muted}>{cliente.cnpj}</p>
-                        </div>
-
-                        <button style={styles.downloadButton} onClick={() => setClienteDestino(cliente.email)}>
-                          Selecionar
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div style={styles.bigCard}>
-                  <h2 style={styles.cardTitle}>Criar Informativo</h2>
-
-                  <select style={styles.input} value={clienteDestino} onChange={(e) => setClienteDestino(e.target.value)}>
-                    <option value="">Selecione o cliente</option>
-                    {clientes.map((cliente, i) => (
-                      <option key={i} value={cliente.email}>
-                        {cliente.nomeEmpresa}
-                      </option>
-                    ))}
-                  </select>
-
-                  <textarea
-                    style={{ ...styles.input, height: 120 }}
-                    placeholder="Digite o informativo"
-                    value={informe}
-                    onChange={(e) => setInforme(e.target.value)}
-                  />
-
-                  <button style={styles.primaryButton} onClick={enviarInforme}>
-                    Enviar Informativo
-                  </button>
-                </div>
-              </div>
-            </section>
-          </>
+          renderPainelContador()
         ) : (
           <>
             <section style={styles.clientHero}>
@@ -1385,4 +1536,70 @@ const styles: any = {
     borderRadius: 22,
     padding: 22,
   },
+
+  adminHero: {
+    background: "linear-gradient(135deg, #ffffff, #eef2ff)",
+    border: "1px solid #dbe4ee",
+    borderRadius: 30,
+    padding: 32,
+    marginBottom: 24,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 20,
+    boxShadow: "0 16px 45px rgba(15,23,42,.07)",
+  },
+  adminHeroActions: {
+    display: "flex",
+    gap: 12,
+    minWidth: 280,
+  },
+  adminGrid: {
+    display: "grid",
+    gridTemplateColumns: "1.4fr .8fr",
+    gap: 24,
+  },
+  adminShortcutGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 16,
+  },
+  adminShortcut: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 22,
+    padding: 18,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    textAlign: "left",
+    cursor: "pointer",
+    boxShadow: "0 10px 28px rgba(15,23,42,.05)",
+  },
+  secondaryButton: {
+    width: "100%",
+    padding: 15,
+    border: "1px solid #ddd6fe",
+    borderRadius: 14,
+    background: "#fff",
+    color: "#7c3aed",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  moduleGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+    gap: 24,
+  },
+  configLine: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 14,
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+
 };
