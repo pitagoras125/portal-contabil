@@ -1,0 +1,24 @@
+{
+  "short_name": "Pitágoras",
+  "name": "Portal do Cliente - Pitágoras Contabilidade",
+  "description": "Sistema exclusivo para gestão de impostos, envio de arquivos e faturas PIX da Pitágoras Contabilidade.",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "logo192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "logo512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#ffffff",
+  "background_color": "#f8fafc"
+}

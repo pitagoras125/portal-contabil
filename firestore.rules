@@ -16,9 +16,17 @@ service cloud.firestore {
       allow create: if isContador() || (request.auth != null && request.resource.data.emailCliente == request.auth.token.email);
     }
 
+    // CORREÇÃO: Permite que o cliente crie avisos se o destino for o escritório
     match /notificacoes/{notifId} {
       allow read, update: if isContador() || (request.auth != null && resource.data.destino == request.auth.token.email);
-      allow create, delete: if isContador();
+      allow create: if isContador() || (request.auth != null && request.resource.data.destino == "contato@pitagorascontabilidade.com.br");
+      allow delete: if isContador();
+    }
+
+    match /solicitacoes/{solicId} {
+      allow read, update: if isContador() || (request.auth != null && resource.data.emailCliente == request.auth.token.email);
+      allow create: if isContador() || (request.auth != null && request.resource.data.emailCliente == request.auth.token.email);
+      allow delete: if isContador();
     }
   }
 }
