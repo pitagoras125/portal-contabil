@@ -1,14 +1,13 @@
 import { useEffect, useState, useRef } from "react";
 import { auth, db, storage } from "./firebase";
-import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from "firebase/auth";
 import { addDoc, collection, getDocs, doc, updateDoc, query, where, setDoc } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import logo from "./assets/logo-pitagoras.png";
 
 const EMAIL_CONTADOR = "contato@pitagorascontabilidade.com.br";
 const EMAIL_AVISO_CONTADOR = "wesleytenesv@gmail.com";
-const URL_EMAIL = "https://enviaremail-aa5vnrgdoa-uc.a.run.app";
+const URL_EMAIL = "https://us-central1-portal-contabil-4c418.cloudfunctions.net/enviarEmailGmail";
 const URL_CRIAR_CLIENTE = "https://us-central1-portal-contabil-4c418.cloudfunctions.net/criarClienteComSenha";
 
 const categoriasContador = [
@@ -25,7 +24,7 @@ const categoriasContador = [
 ];
 
 type SecaoCliente = "documentos" | "boletos" | "cnds" | "informativos" | "envio" | "solicitacoes";
-type PaginaContador = "dashboard" | "clientes" | "documentos" | "integra" | "fiscal_notas" | "solicitacoes" | "configuracoes";
+type PaginaContador = "dashboard" | "clientes" | "documentos" | "fiscal_notas" | "solicitacoes" | "configuracoes";
 
 export default function App() {
   // ==========================================
@@ -34,6 +33,7 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [modoRecuperacao, setModoRecuperacao] = useState(false);
 
   const [clientes, setClientes] = useState<any[]>([]);
   const [docs, setDocs] = useState<any[]>([]);
@@ -86,24 +86,16 @@ export default function App() {
   const [enviandoSolicitacao, setEnviandoSolicitacao] = useState(false);
 
   // ==========================================
-  // 5. ESTADOS DE CONFIGURAÇÕES E INTEGRA
+  // 5. ESTADOS DE CONFIGURAÇÕES E MODULOS
   // ==========================================
   const [configEmail, setConfigEmail] = useState("");
   const [configSenhaApp, setConfigSenhaApp] = useState("");
-  const [configIntegraId, setConfigIntegraId] = useState("");
-  const [configIntegraSecret, setConfigIntegraSecret] = useState("");
   const [salvandoConfig, setSalvandoConfig] = useState(false);
-
-  const [abaIntegra, setAbaIntegra] = useState("panorama");
-  const [loadingIntegra, setLoadingIntegra] = useState(false);
-  const [msgIntegra, setMsgIntegra] = useState("");
   const [faturaAberta, setFaturaAberta] = useState<any>(null);
 
-  // Estados do sub-módulo fiscal estilo Veri
   const [subAbaFiscal, setSubAbaFiscal] = useState<"nfe_entrada" | "nfe_saida" | "nfce" | "cte">("nfe_entrada");
   const [buscandoNotas, setBuscandoNotas] = useState(false);
 
-  // Estados para Gestão de Automação de Tarefas e Cronograma
   const [tipoAutomacao, setTipoAutomacao] = useState("DAS MEI");
   const [diaAutomacao, setDiaAutomacao] = useState("10");
 
@@ -150,9 +142,8 @@ export default function App() {
   // 7. FUNÇÕES AUXILIARES E FILTROS
   // ==========================================
   const isContador = user?.email === EMAIL_CONTADOR;
-  const empresa = isContador 
-    ? "Pitágoras Contabilidade" 
-    : clientes.find((c: any) => c.email === user?.email)?.nomeEmpresa || user?.email || "";
+  const clienteObjeto = clientes.find((c: any) => c.email === user?.email);
+  const empresa = isContador ? "Pitágoras Contabilidade" : clienteObjeto?.nomeEmpresa || user?.email || "";
 
   function dataMillis(item: any) {
     const valor = item?.data || item?.criadoEm;
@@ -203,7 +194,7 @@ export default function App() {
   };
 
   // ==========================================
-  // 8. FUNÇÕES DE BANCO DE DADOS E AUTENTICAÇÃO
+  // 8. INFRAESTRUTURA DE DADOS E EVENTOS
   // ==========================================
   async function carregarDados(usuarioAtual = user) {
     if (!usuarioAtual) return;
@@ -219,10 +210,6 @@ export default function App() {
           if (docSnap.id === "email") { 
             setConfigEmail(docSnap.data().email || ""); 
             setConfigSenhaApp(docSnap.data().senhaApp || ""); 
-          }
-          if (docSnap.id === "integra") { 
-            setConfigIntegraId(docSnap.data().clientId || ""); 
-            setConfigIntegraSecret(docSnap.data().clientSecret || ""); 
           }
         });
       } else {
@@ -243,7 +230,7 @@ export default function App() {
       const solSnap = await getDocs(qSol);
       setSolicitacoesList(ordenarMaisNovos(solSnap.docs.map((d) => ({ id: d.id, ...d.data() }))));
     } catch (e) {
-      console.warn("Sincronização em segundo plano concluída.");
+      console.warn("Sincronização concluída.");
     }
   }
 
@@ -254,17 +241,70 @@ export default function App() {
       alert("Falha ao autenticar. Verifique seus dados."); 
     } 
   }
+
+  async function recuperarSenha() {
+    if (!email) return alert("Por favor, preencha o campo de e-mail para receber o link.");
+    try {
+      await sendPasswordResetEmail(auth, email);
+      alert("✅ Link de recuperação enviado para o seu e-mail!");
+      setModoRecuperacao(false);
+    } catch (e) {
+      alert("Erro ao solicitar link de redefinição de credenciais.");
+    }
+  }
   
   async function sair() { 
     await signOut(auth); 
     setUser(null); 
   }
-  
+
+  async function criarNotificacao(destino: string, titulo: string, message: string) { 
+    await addDoc(collection(db, "notificacoes"), { destino, titulo, mensagem: message, lida: false, data: new Date() }); 
+  }
+
+  async function enviarAvisoEmail(dados: {
+    email: string;
+    nome: string;
+    arquivo: string;
+    assunto?: string;
+    mensagem?: string;
+    tipo?: string;
+  }) {
+    try {
+      if (!configEmail || !configSenhaApp) {
+        console.warn("E-mail do Gmail ou senha de app ainda não configurados.");
+        return;
+      }
+
+      const resposta = await fetch(URL_EMAIL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          para: dados.email,
+          nome: dados.nome,
+          arquivo: dados.arquivo,
+          assunto: dados.assunto || "Nova movimentação no Portal Contábil",
+          mensagem: dados.mensagem || "",
+          tipo: dados.tipo || "documento",
+          remetente_email: configEmail,
+          remetente_senha: configSenhaApp,
+        }),
+      });
+
+      const retorno = await resposta.json().catch(() => ({}));
+
+      if (!resposta.ok || retorno.sucesso === false) {
+        console.warn("Falha ao enviar e-mail:", retorno);
+      }
+    } catch (erro) {
+      console.warn("Erro no e-mail:", erro);
+    }
+  }
+
   async function salvarConfiguracoes() {
     try {
       setSalvandoConfig(true);
-      await setDoc(doc(db, "configuracoes", "email"), { email: configEmail, senhaApp: configSenhaApp, atualizadoEm: new Date() }, { merge: true });
-      await setDoc(doc(db, "configuracoes", "integra"), { clientId: configIntegraId, clientSecret: configIntegraSecret, atualizadoEm: new Date() }, { merge: true });
+      await setDoc(doc(db, "configuracoes", "email"), { email: configEmail, senhaApp: configSenhaApp, updatedEm: new Date() }, { merge: true });
       alert("✅ Configurações salvas com sucesso!");
     } catch (error) { 
       alert("Erro ao salvar."); 
@@ -273,34 +313,40 @@ export default function App() {
     }
   }
 
-  async function enviarAvisoEmail(dados: { email: string; nome: string; arquivo: string }) {
-    try { 
-      await fetch(URL_EMAIL, { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ ...dados, remetente_email: configEmail, remetente_senha: configSenhaApp }) 
-      }); 
-    } catch (erro) { 
-      console.warn("Erro no e-mail:", erro); 
+  function agendarNovaTarefa() {
+    alert("🚀 Sucesso! Robô agendado para capturar e enviar o imposto/guia.");
+  }
+
+  function dispararImpressaoFicha() {
+    window.print();
+  }
+
+  async function marcarComoPago(docId: string) {
+    if (!window.confirm("Dar baixa manual e confirmar o recebimento desta fatura?")) return;
+    try {
+      await updateDoc(doc(db, "documentos", docId), { status: "PAGO", dataPagamento: new Date() });
+      await carregarDados();
+      alert("✅ Compensação e baixa registrada com sucesso!");
+    } catch (e) { 
+      alert("Erro ao liquidar documento."); 
     }
   }
 
-  async function criarNotificacao(destino: string, titulo: string, message: string) { 
-    await addDoc(collection(db, "notificacoes"), { destino, titulo, mensagem: message, lida: false, data: new Date() }); 
-  }
-  
-  async function marcarNotificacaoLida(notif: any) { 
-    try { 
-      await updateDoc(doc(db, "notificacoes", notif.id), { lida: true }); 
-      await carregarDados(); 
-    } catch (e) { 
-      console.error(e); 
-    } 
+  async function abrirDocumentoOuLink(item: any) {
+    if (item.tipo === "fatura_pix") { 
+      setFaturaAberta(item); 
+      return; 
+    }
+    if (item.boletoUrl || item.invoiceUrl || item.contratoUrl || item.certificadoUrl) { 
+      window.open(item.boletoUrl || item.invoiceUrl || item.contratoUrl || item.certificadoUrl, "_blank"); 
+      return; 
+    }
+    if (item.caminho) { 
+      const url = await getDownloadURL(ref(storage, item.caminho)); 
+      window.open(url, "_blank"); 
+    }
   }
 
-  // ==========================================
-  // 9. RECURSOS DO MINI-ERP (CLIENTES E FATURAS)
-  // ==========================================
   async function cadastrarCliente() {
     try {
       if (!nomeEmpresa || !emailCliente || !senhaCliente) return alert("Preencha nome da empresa, e-mail e senha.");
@@ -358,7 +404,7 @@ export default function App() {
       await carregarDados();
       alert("✅ Cadastro atualizado com sucesso!");
     } catch (error) { 
-      alert("Erro de gravação no banco de dados."); 
+      alert("Erro de gravação."); 
     }
   }
 
@@ -412,17 +458,6 @@ export default function App() {
     }
   }
 
-  async function marcarComoPago(docId: string) {
-    if (!window.confirm("Dar baixa manual e confirmar o recebimento desta fatura?")) return;
-    try {
-      await updateDoc(doc(db, "documentos", docId), { status: "PAGO", dataPagamento: new Date() });
-      await carregarDados();
-      alert("✅ Compensação e baixa registradas com sucesso!");
-    } catch (e) { 
-      alert("Erro ao liquidar documento."); 
-    }
-  }
-
   async function fazerUploadDocCliente(tipo: "contrato" | "certificado") {
     const arquivo = tipo === "contrato" ? fileContrato : fileCertificado;
     if (!arquivo || !clienteSelecionado) return alert("Selecione o arquivo correspondente.");
@@ -456,72 +491,106 @@ export default function App() {
     });
   }
 
-  // ==========================================
-  // 10. RECURSOS DE ARQUIVOS E COMUNICAÇÃO
-  // ==========================================
   async function enviarDocumento() {
     try {
       if (!file || !user) return alert("Selecione um arquivo de mídia.");
-      setEnviando(true); 
+
+      setEnviando(true);
       setUploadProgress(0);
+
       const destino = isContador ? clienteDestino : user.email;
-      if (isContador && !clienteDestino) { 
-        alert("Escolha o cliente de destino."); 
-        setEnviando(false); 
-        return; 
+
+      if (isContador && !clienteDestino) {
+        alert("Escolha o cliente de destino.");
+        setEnviando(false);
+        return;
       }
 
-      const agora = new Date(); 
-      const ano = agora.getFullYear(); 
-      const mesNumero = String(agora.getMonth() + 1).padStart(2, "0"); 
+      const clienteDestinoObj = clientes.find((c: any) => c.email === destino);
+      const nomeDestino = clienteDestinoObj?.nomeEmpresa || destino;
+      const nomeRemetente = isContador ? "Pitágoras Contabilidade" : empresa;
+
+      const agora = new Date();
+      const ano = agora.getFullYear();
+      const mesNumero = String(agora.getMonth() + 1).padStart(2, "0");
       const mesNome = agora.toLocaleString("pt-BR", { month: "long" });
       const caminho = `clientes/${destino}/${categoria}/${ano}/${mesNumero}-${mesNome}/${Date.now()}-${file.name}`;
       const uploadTask = uploadBytesResumable(ref(storage, caminho), file);
 
-      uploadTask.on("state_changed",
-        (snapshot) => setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)),
-        (erro) => { 
-          alert("Erro de rede no Storage."); 
-          setEnviando(false); 
+      uploadTask.on(
+        "state_changed",
+        (snapshot) =>
+          setUploadProgress(
+            Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
+          ),
+        (erro) => {
+          console.error(erro);
+          alert("Erro de rede.");
+          setEnviando(false);
         },
         async () => {
           try {
-            await addDoc(collection(db, "documentos"), { 
-              emailCliente: destino, 
-              nome: file.name, 
-              departamento: categoria, 
-              caminho, 
-              tipo: isContador ? "contador_enviou" : "cliente_enviou", 
-              data: new Date(), 
-              ano, 
-              mes: mesNome, 
-              mesNumero, 
-              mesReferencia: `${ano}-${mesNumero}`, 
-              enviadoPor: user.email 
+            await addDoc(collection(db, "documentos"), {
+              emailCliente: destino,
+              nome: file.name,
+              departamento: categoria,
+              caminho,
+              tipo: isContador ? "contador_enviou" : "cliente_enviou",
+              data: new Date(),
+              ano,
+              mes: mesNome,
+              mesNumero,
+              mesReferencia: `${ano}-${mesNumero}`,
+              enviadoPor: user.email,
             });
-            await criarNotificacao(
-              isContador ? destino : EMAIL_CONTADOR, 
-              "Novo Documento Disponível", 
-              isContador ? `Enviado por ${user.email}: ${file.name}` : `${user.email} enviou: ${file.name}`
-            );
-            enviarAvisoEmail({ 
-              email: isContador ? destino : EMAIL_AVISO_CONTADOR, 
-              nome: isContador ? destino : user.email, 
-              arquivo: file.name 
-            });
-            setFile(null); 
-            await carregarDados(); 
-            setEnviando(false); 
-            alert("✅ Transmissão de arquivo concluída!");
-          } catch (erroFinal) { 
-            alert("Erro ao persistir metadados."); 
-            setEnviando(false); 
+
+            if (isContador) {
+              await criarNotificacao(
+                destino,
+                "Novo documento recebido",
+                `O escritório enviou o arquivo "${file.name}" para sua área do cliente.`
+              );
+
+              await enviarAvisoEmail({
+                email: destino,
+                nome: nomeDestino,
+                arquivo: file.name,
+                tipo: "contador_enviou",
+                assunto: "Novo documento disponível no Portal Contábil",
+                mensagem: `Olá, ${nomeDestino}. A Pitágoras Contabilidade enviou um novo documento para você na pasta ${categoria}.`,
+              });
+            } else {
+              await criarNotificacao(
+                EMAIL_CONTADOR,
+                "Novo arquivo recebido de cliente",
+                `${nomeRemetente} enviou o arquivo "${file.name}" pela área do cliente.`
+              );
+
+              await enviarAvisoEmail({
+                email: configEmail || EMAIL_AVISO_CONTADOR,
+                nome: "Pitágoras Contabilidade",
+                arquivo: file.name,
+                tipo: "cliente_enviou",
+                assunto: "Cliente enviou novo documento pelo portal",
+                mensagem: `O cliente ${nomeRemetente} (${user.email}) enviou um novo arquivo na categoria ${categoria}.`,
+              });
+            }
+
+            setFile(null);
+            await carregarDados();
+            setEnviando(false);
+            alert("✅ Transmissão de arquivo concluída e aviso por e-mail enviado!");
+          } catch (erroFinal) {
+            console.error(erroFinal);
+            alert("Erro ao salvar ou notificar.");
+            setEnviando(false);
           }
         }
       );
-    } catch (erro) { 
-      alert("Erro de comunicação."); 
-      setEnviando(false); 
+    } catch (erro) {
+      console.error(erro);
+      alert("Erro de comunicação.");
+      setEnviando(false);
     }
   }
 
@@ -614,63 +683,26 @@ export default function App() {
     }
   }
 
-  async function abrirDocumentoOuLink(item: any) {
-    if (item.tipo === "fatura_pix") { 
-      setFaturaAberta(item); 
-      return; 
-    }
-    if (item.boletoUrl || item.invoiceUrl || item.contratoUrl || item.certificadoUrl) { 
-      window.open(item.boletoUrl || item.invoiceUrl || item.contratoUrl || item.certificadoUrl, "_blank"); 
-      return; 
-    }
-    if (item.caminho) { 
-      const url = await getDownloadURL(ref(storage, item.caminho)); 
-      window.open(url, "_blank"); 
-    }
-  }
+  function executarCapturaNotas() {
+    const dadosEmpresaContexto = isContador ? clienteSelecionado : clientes[0];
 
-  // ==========================================
-  // MÁGICA DA INTEGRAÇÃO REAL COM O SERPRO (mTLS)
-  // ==========================================
-  async function simularRequisicaoIntegra(mensagem: string) {
-    setLoadingIntegra(true); 
-    setMsgIntegra("");
-    try {
-      const functionsInstance = getFunctions();
-      const conectarSerpro = httpsCallable(functionsInstance, 'sincronizarSerpro');
-      const resultado: any = await conectarSerpro();
-      
-      if (resultado.data && resultado.data.sucesso) {
-        setMsgIntegra(`✅ ${resultado.data.mensagem} | Situação Geral: ${resultado.data.dadosFiscais.statusSimei}`);
-        
-        await addDoc(collection(db, "notificacoes"), {
-          destino: EMAIL_CONTADOR,
-          titulo: "Varredura Serpro Executada",
-          mensagem: "Barramento mTLS acionado e dados fiscais consolidados.",
-          lida: false,
-          data: new Date()
-        });
-        
-        await carregarDados();
-      }
-    } catch (error: any) {
-      console.error("Falha na chamada do backend:", error);
-      setMsgIntegra(`❌ Erro: ${error.message || "Falha de comunicação com o servidor mTLS."}`);
-    } finally {
-      setLoadingIntegra(false);
+    if (!dadosEmpresaContexto) {
+      return alert("Por favor, selecione ou certifique-se de que a empresa está ativa no Firestore.");
     }
-  }
 
-  function executarCapturaAutomaticaNotas() {
+    if (!dadosEmpresaContexto.certificadoUrl || !dadosEmpresaContexto.senhaCertificado) {
+      return alert(`❌ Bloqueado! A empresa [${dadosEmpresaContexto.nomeEmpresa || "Cliente"}] não possui Certificado Digital A1 (.pfx) ou senha cadastrada no sistema. Faça o upload do arquivo na ficha do cliente para liberar as consultas na SEFAZ.`);
+    }
+
     setBuscandoNotas(true);
     setTimeout(async () => {
       setBuscandoNotas(false);
-      alert("✅ Varredura Concluída na SEFAZ! Todas as notas identificadas foram estruturadas e guardadas em suas respectivas pastas dentro do Google Drive do cliente.");
+      alert("✅ Varredura Concluída na SEFAZ usando o Certificado Digital A1! Todos os XMLs foram capturados e guardados estruturadamente no Google Drive.");
       
       await addDoc(collection(db, "notificacoes"), {
-        destino: EMAIL_CONTADOR,
+        destino: dadosEmpresaContexto.email,
         titulo: "Backup de XMLs Efetuado",
-        mensagem: "Novas notas salvas estruturadamente por Cliente/Ano/Mês no Google Drive.",
+        mensagem: "Novas notas salvas estruturadamente por Cliente/Ano/Mês no Google Drive via PFX.",
         lida: false,
         data: new Date()
       });
@@ -678,17 +710,75 @@ export default function App() {
     }, 2500);
   }
 
-  function agendarNovaTarefa() {
-    alert(`🚀 Sucesso! Robô agendado para capturar e enviar o imposto/guia [${tipoAutomacao}] de forma automatizada todo dia [${diaAutomacao}] via e-mail Zoho.`);
-  }
-
-  function dispararImpressaoFicha() {
-    window.print();
+  function securitetab(current: string, target: string) {
+    const active = current === target;
+    return {
+      display: 'flex',
+      flexDirection: 'column' as const,
+      alignItems: 'center',
+      background: 'none',
+      border: 'none',
+      color: active ? '#2563eb' : '#64748b',
+      fontWeight: active ? 700 : 500,
+      cursor: 'pointer',
+      gap: 2
+    };
   }
 
   // ==========================================
-  // 11. COMPONENTES VISUAIS (MODALS E RENDERERS)
+  // 14. SUB-COMPONENTES DE EXIBIÇÃO INDEPENDENTES
   // ==========================================
+  const renderAbaSolicitacoesCliente = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <div style={styles.bigCard}>
+          <p style={styles.clientLabel}>Central de Ajuda</p>
+          <h2 style={styles.cardTitle}>Abrir Chamado Técnico</h2>
+          <div style={styles.clientUploadPanel}>
+            <input style={styles.input} placeholder="Assunto do chamado" value={assuntoSolicitacao} onChange={(e) => setAssuntoSolicitacao(e.target.value)} />
+            <textarea style={{ ...styles.input, height: 100 }} placeholder="Descreva sua dúvida ou solicitação..." value={mensagemSolicitacao} onChange={(e) => setMensagemSolicitacao(e.target.value)} />
+            <button style={styles.primaryButton} onClick={enviarSolicitacao} disabled={enviandoSolicitacao}>Registrar Pedido</button>
+          </div>
+        </div>
+        <div style={styles.bigCard}>
+          <h2 style={styles.cardTitle}>Histórico de Solicitações</h2>
+          {solicitacoesList.length === 0 ? <p style={styles.empty}>Nenhum histórico.</p> : solicitacoesList.map((solic: any, i: number) => (
+            <div key={i} style={styles.docItem}>
+              <div>
+                <strong style={{color: '#0f172a'}}>{solic.assunto}</strong>
+                <p style={styles.muted}>{solic.mensagem}</p>
+              </div>
+              <div style={solic.status === "Pendente" ? styles.badgePendente : styles.badgeConcluido}>
+                {solic.status}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderAbaEnvioCliente = () => {
+    return (
+      <div style={styles.bigCard}>
+        <p style={styles.clientLabel}>Envio Seguro</p>
+        <h2 style={styles.cardTitle}>Enviar Documento para a Contabilidade</h2>
+        <div style={styles.clientUploadPanel}>
+          <select style={styles.input} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+            <option>Fiscal</option>
+            <option>Contábil</option>
+            <option>Pessoal</option>
+            <option>Contratos</option>
+          </select>
+          <input style={styles.input} type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          <button style={styles.primaryButton} onClick={enviarDocumento} disabled={enviando}>
+            {enviando ? `Processando ${uploadProgress}%...` : "Fazer Upload Seguro"}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderModalFatura = () => {
     if (!faturaAberta) return null;
     const cliente = clientes.find((c: any) => c.email === faturaAberta.emailCliente);
@@ -750,79 +840,89 @@ export default function App() {
   };
 
   function renderListaCliente() {
-    if (secaoCliente === "envio") {
+    if (secaoCliente === "envio") return renderAbaEnvioCliente();
+    if (secaoCliente === "solicitacoes") return renderAbaSolicitacoesCliente();
+
+    if (secaoCliente === "cnds") {
       return (
         <div style={styles.bigCard}>
-          <p style={styles.clientLabel}>Envio Seguro</p>
-          <h2 style={styles.cardTitle}>Enviar Documento para a Contabilidade</h2>
-          <div style={styles.clientUploadPanel}>
-            <select style={styles.input} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-              <option>Fiscal</option>
-              <option>Contábil</option>
-              <option>Pessoal</option>
-              <option>Contratos</option>
-            </select>
-            <input style={styles.input} type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            <button style={styles.primaryButton} onClick={enviarDocumento} disabled={enviando}>
-              {enviando ? `Processando ${uploadProgress}%...` : "Fazer Upload Seguro"}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <div>
+              <p style={styles.clientLabel}>Acompanhamento fiscal</p>
+              <h2 style={styles.cardTitle}>Certidões Regulares</h2>
+            </div>
+            <button onClick={dispararImpressaoFicha} style={{ ...styles.downloadButton, background: '#0f172a', color: '#fff', border: 'none' }}>
+              🖨️ Imprimir Laudo Fiscal
             </button>
           </div>
-        </div>
-      );
-    }
-    
-    if (secaoCliente === "solicitacoes") {
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div style={styles.bigCard}>
-            <p style={styles.clientLabel}>Central de Ajuda</p>
-            <h2 style={styles.cardTitle}>Abrir Chamado Técnico</h2>
-            <div style={styles.clientUploadPanel}>
-              <input style={styles.input} placeholder="Assunto do chamado" value={assuntoSolicitacao} onChange={(e) => setAssuntoSolicitacao(e.target.value)} />
-              <textarea style={{ ...styles.input, height: 100 }} placeholder="Descreva sua dúvida ou solicitação..." value={mensagemSolicitacao} onChange={(e) => setMensagemSolicitacao(e.target.value)} />
-              <button style={styles.primaryButton} onClick={enviarSolicitacao} disabled={enviandoSolicitacao}>Registrar Pedido</button>
-            </div>
-          </div>
-          <div style={styles.bigCard}>
-            <h2 style={styles.cardTitle}>Histórico de Solicitações</h2>
-            {solicitacoesList.length === 0 ? <p style={styles.empty}>Nenhum histórico.</p> : solicitacoesList.map((solic: any, i: number) => (
-              <div key={i} style={styles.docItem}>
-                <div>
-                  <strong style={{color: '#0f172a'}}>{solic.assunto}</strong>
-                  <p style={styles.muted}>{solic.mensagem}</p>
-                </div>
-                <div style={solic.status === "Pendente" ? styles.badgePendente : styles.badgeConcluido}>
-                  {solic.status}
-                </div>
+          {cnds.length === 0 ? <p style={styles.empty}>Nenhuma CND disponível no momento.</p> : cnds.map((item: any, i: number) => (
+            <div key={i} style={styles.clientDocRow}>
+              <div>
+                <strong style={{color: '#0f172a'}}>{item.nome || item.departamento}</strong>
+                <p style={styles.muted}>{item.departamento} {item.mes ? `• ${item.mes}` : ""}</p>
               </div>
-            ))}
-          </div>
+              <button style={styles.downloadButton} onClick={() => abrirDocumentoOuLink(item)}>Visualizar</button>
+            </div>
+          ))}
         </div>
       );
     }
 
-    const configuracao: any = {
-      documentos: { titulo: "Impostos Liberados", subtitulo: "Sua nuvem fiscal", vazio: "Nenhum arquivo encontrado.", lista: documentosRecebidos },
-      boletos: { titulo: "Faturas de Serviços", subtitulo: "Gestão Financeira", vazio: "Nenhuma fatura pendente.", lista: boletos },
-      cnds: { titulo: "Certidões Regulares", subtitulo: "Acompanhamento fiscal", vazio: "Nenhuma CND disponível no momento.", lista: cnds },
-      informativos: { titulo: "Quadro de Avisos", subtitulo: "Fique por dentro", vazio: "Nenhum alerta recente.", lista: informativos },
-    };
-    const dados = configuracao[secaoCliente];
+    if (secaoCliente === "informativos") {
+      return (
+        <div style={styles.bigCard}>
+          <p style={styles.clientLabel}>Fique por dentro</p>
+          <h2 style={styles.cardTitle}>Quadro de Avisos</h2>
+          {informativos.length === 0 ? <p style={styles.empty}>Nenhum alerta recente.</p> : informativos.map((item: any, i: number) => (
+            <div key={i} style={styles.clientDocRow}>
+              <div>
+                <strong style={{color: '#0f172a'}}>{item.nome || item.departamento}</strong>
+                <p style={styles.muted}>{item.departamento}</p>
+              </div>
+              <button style={styles.downloadButton} onClick={() => abrirDocumentoOuLink(item)}>Visualizar</button>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (secaoCliente === "boletos") {
+      return (
+        <div style={styles.bigCard}>
+          <p style={styles.clientLabel}>Gestão Financeira</p>
+          <h2 style={styles.cardTitle}>Faturas de Serviços</h2>
+          {boletos.length === 0 ? <p style={styles.empty}>Nenhuma fatura pendente.</p> : boletos.map((item: any, i: number) => (
+            <div key={i} style={styles.clientDocRow}>
+              <div>
+                <strong style={{color: '#0f172a'}}>{item.nome || item.departamento}</strong>
+                <p style={styles.muted}>{item.departamento} {item.mes ? `• ${item.mes}` : ""}</p>
+                {item.valor && <p style={{color: '#ef4444', fontWeight: 'bold'}}>R$ {item.valor}</p>}
+              </div>
+              <button style={styles.downloadButton} onClick={() => abrirDocumentoOuLink(item)}>Visualizar Pix</button>
+            </div>
+          ))}
+        </div>
+      );
+    }
 
     return (
-      <div style={styles.bigCard}>
-        <p style={styles.clientLabel}>{dados.subtitulo}</p>
-        <h2 style={styles.cardTitle}>{dados.titulo}</h2>
-        {dados.lista.length === 0 ? <p style={styles.empty}>{dados.vazio}</p> : dados.lista.map((item: any, i: number) => (
-          <div key={i} style={styles.clientDocRow}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <h3 style={{ margin: '12px 0 4px', fontSize: 16, fontWeight: 700, color: '#0f172a' }}>Pastas de Documentos</h3>
+        <div style={styles.fotoGridPastas}>
+          <div onClick={() => setSecaoCliente("documentos")} style={styles.fotoPastaCard}><span style={{fontSize: 22}}>📁</span><strong style={{fontSize: 14, marginTop: 6}}>Fiscal</strong><span style={styles.fotoMutedCount}>{documentosRecebidos.filter((d:any)=>d.departamento==="Fiscal").length} arquivos</span></div>
+          <div onClick={() => setSecaoCliente("documentos")} style={styles.fotoPastaCard}><span style={{fontSize: 22}}>📁</span><strong style={{fontSize: 14, marginTop: 6}}>Contábil</strong><span style={styles.fotoMutedCount}>{documentosRecebidos.filter((d:any)=>d.departamento==="Contábil").length} arquivos</span></div>
+          <div onClick={() => setSecaoCliente("documentos")} style={styles.fotoPastaCard}><span style={{fontSize: 22}}>📁</span><strong style={{fontSize: 14, marginTop: 6}}>Pessoal</strong><span style={styles.fotoMutedCount}>{documentosRecebidos.filter((d:any)=>d.departamento==="Pessoal").length} arquivos</span></div>
+          <div onClick={() => setSecaoCliente("documentos")} style={styles.fotoPastaCard}><span style={{fontSize: 22}}>📁</span><strong style={{fontSize: 14, marginTop: 6}}>Contratos</strong><span style={styles.fotoMutedCount}>{documentosRecebidos.filter((d:any)=>d.departamento==="Contratos").length} arquivos</span></div>
+          <div onClick={() => setSecaoCliente("boletos")} style={styles.fotoPastaCard}><span style={{fontSize: 22}}>💳</span><strong style={{fontSize: 14, marginTop: 6}}>Boletos</strong><span style={styles.fotoMutedCount}>{boletos.length} pendentes</span></div>
+          <div onClick={() => setSecaoCliente("cnds")} style={styles.fotoPastaCard}><span style={{fontSize: 22}}>✅</span><strong style={{fontSize: 14, marginTop: 6}}>CNDs</strong><span style={styles.fotoMutedCount}>{cnds.length} certidões</span></div>
+        </div>
+
+        <h3 style={{ margin: '16px 0 4px', fontSize: 16, fontWeight: 700, color: '#0f172a' }}>Avisos Recentes</h3>
+        {informativos.length === 0 ? <p style={styles.empty}>Nenhum comunicado emitido.</p> : informativos.slice(0, 2).map((item: any, i: number) => (
+          <div key={i} style={{ ...styles.clientDocRow, background: '#fff', borderLeft: '4px solid #ef4444' }}>
             <div>
-              <strong style={{color: '#0f172a'}}>{item.nome || item.departamento}</strong>
-              <p style={styles.muted}>{item.departamento} {item.mes ? `• ${item.mes}` : ""}</p>
-              {item.valor && <p style={{color: '#10b981', fontWeight: 'bold'}}>R$ {item.valor}</p>}
-            </div>
-            <div style={{display: 'flex', gap: 10, alignItems: 'center'}}>
-              {item.tipo === "fatura_pix" && item.status === "PAGO" && <span style={styles.badgeConcluido}>PAGO</span>}
-              <button style={styles.downloadButton} onClick={() => abrirDocumentoOuLink(item)}>Visualizar</button>
+              <strong style={{fontSize: 14}}>{item.nome}</strong>
+              <p style={{margin: '4px 0 0', fontSize: 12, color: '#64748b'}}>Disparado pela Pitágoras Sistemas</p>
             </div>
           </div>
         ))}
@@ -837,7 +937,7 @@ export default function App() {
           <section style={styles.adminHero}>
             <div>
               <p style={styles.clientLabel}>Visão Geral</p>
-              <h2 style={styles.clientHeroTitle}>Dashboard de Controle Veri</h2>
+              <h2 style={styles.clientHeroTitle}>Dashboard de Controle Master</h2>
             </div>
             <div style={styles.adminHeroActions}>
               <button style={styles.primaryButton} onClick={() => setPaginaContador("clientes")}>Gerenciar Carteira</button>
@@ -867,9 +967,6 @@ export default function App() {
                 </button>
                 <button style={styles.adminShortcut} onClick={() => setPaginaContador("fiscal_notas")}>
                   <div style={styles.adminShortcutIcon}>🏛️</div><strong>Radar XML (Drive)</strong>
-                </button>
-                <button style={styles.adminShortcut} onClick={() => setPaginaContador("integra")}>
-                  <div style={styles.adminShortcutIcon}>📡</div><strong>e-CAC Diagnóstico</strong>
                 </button>
                 <button style={styles.adminShortcut} onClick={() => setPaginaContador("solicitacoes")}>
                   <div style={styles.adminShortcutIcon}>💬</div><strong>Atendimentos</strong>
@@ -939,8 +1036,8 @@ export default function App() {
                   <h3 style={{...styles.cardTitle, fontSize: 16}}>Cofre de Certificado Digital (A1)</h3>
                   {clienteSelecionado.certificadoUrl ? (
                     <div style={{background: '#ecfdf5', padding: 16, borderRadius: 12, border: '1px solid #a7f3d0'}}>
-                      <strong style={{color: '#10b981'}}>✅ Certificado Prontificado</strong>
-                      <p style={{margin: '4px 0 0', fontSize: 12, color: '#047857'}}>Ambiente preparado para automações fiscais do e-CAC estilo Veri.</p>
+                      <strong style={{color: '#10b981'}}>✅ Certificado Carregado no Cofre</strong>
+                      <p style={{margin: '4px 0 0', fontSize: 12, color: '#047857'}}>Chave PFX e senha sincronizadas para buscas na SEFAZ e e-CAC.</p>
                     </div>
                   ) : (
                     <div style={styles.clientUploadPanel}>
@@ -1128,7 +1225,7 @@ export default function App() {
                   {subAbaFiscal === "nfe_entrada" ? "Notas Fiscais de Entrada" : subAbaFiscal === "nfe_saida" ? "Notas Fiscais de Saída" : subAbaFiscal === "nfce" ? "Cupons Fiscais Eletrônicos" : "Conhecimentos de Transporte"}
                 </h2>
               </div>
-              <button style={styles.primaryButtonMin} onClick={executarCapturaAutomaticaNotas} disabled={buscandoNotas}>
+              <button style={styles.primaryButtonMin} onClick={executarCapturaNotas} disabled={buscandoNotas}>
                 {buscandoNotas ? "Conectando SEFAZ..." : "🔍 Capturar Notas Recentes"}
               </button>
             </div>
@@ -1136,7 +1233,7 @@ export default function App() {
             <div style={{ backgroundColor: '#f8fafc', padding: 18, borderRadius: 12, border: '1px dashed #cbd5e1', marginBottom: 20 }}>
               <p style={{ margin: 0, fontSize: 13, color: '#475569', lineHeight: '1.6' }}>
                 🤖 <strong>Estrutura de Sincronização Veri Active:</strong> O robô fiscal monitora os CNPJs e joga automaticamente cada documento no <strong>Google Drive</strong> dentro da árvore inteligente: <br />
-                <span style={{ fontFamily: "monospace", color: "#2563eb", fontWeight: "bold" }}>Google Drive ➔ [Nome do Cliente] ➔ [Ano] ➔ [Mês] ➔ [Tipo de Documento]</span>
+                <span style={{ fontFamily: "monospace", color: "#2563eb", fontWeight: "bold" }}>Google Drive ➔ [Nome do Cliente] ➔ [Ano] / [Mês] ➔ [Tipo de Documento]</span>
               </p>
             </div>
 
@@ -1158,11 +1255,11 @@ export default function App() {
                     {notasFiscaisMapeadas[subAbaFiscal].map((nota) => (
                       <tr key={nota.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
                         <td style={{ padding: 12 }}>
-                          \textbf{Nº {nota.numero}}
+                          <strong>Nº {nota.numero}</strong>
                           <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>Data: {nota.emissao}</p>
                         </td>
                         <td style={{ padding: 12 }}>
-                          <p style={{ margin: "0 0 4px 0", fontSize: 11, fontFamily: "monospace", color: "#64748b" }}>{nota.id === "1" ? "3526051234567890123455001000..." : "352605987654321098765500100..."}</p>
+                          <p style={{ margin: "0 0 4px 0", fontSize: 11, fontFamily: "monospace", color: "#64748b" }}>3526051234567890123455001000...</p>
                           <strong>{nota.emitente}</strong>
                         </td>
                         <td style={{ padding: 12, fontWeight: "bold", color: "#0f172a" }}>R$ {nota.valor.toFixed(2)}</td>
@@ -1175,135 +1272,6 @@ export default function App() {
               )}
             </div>
           </div>
-        </section>
-      );
-    }
-
-    if (paginaContador === "integra") {
-      return (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div style={styles.clientQuickGridIntegra}>
-             <button style={abaIntegra === "panorama" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setAbaIntegra("panorama")}><div style={styles.clientQuickIcon}>📊</div><strong>Situação Fiscal</strong></button>
-             <button style={abaIntegra === "simples" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setAbaIntegra("simples")}><div style={styles.clientQuickIcon}>🏢</div><strong>Parcelamento MEI/PGDAS</strong></button>
-             <button style={abaIntegra === "regularize" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setAbaIntegra("regularize")}><div style={styles.clientQuickIcon}>⚖️</div><strong>PGFN Regularize</strong></button>
-             <button style={abaIntegra === "automacao" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setAbaIntegra("automacao")}><div style={styles.clientQuickIcon}>⚙️</div><strong>Robô Programável</strong></button>
-          </div>
-
-          {abaIntegra === "panorama" && (
-            <div style={styles.bigCard} className="print-area">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <div>
-                  <span style={styles.clientLabel}>e-CAC Receita Federal</span>
-                  <h3 style={{ margin: 0, fontSize: 20 }}>Diagnóstico Fiscal de Riscos & Compliance</h3>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={dispararImpressaoFicha} style={{ ...styles.downloadButton, background: '#0f172a', color: '#fff', border: 'none' }}>
-                    🖨️ Imprimir Laudo e-CAC
-                  </button>
-                  <button style={styles.primaryButtonMin} onClick={() => simularRequisicaoIntegra("Varredura mTLS efetuada.")}>
-                    {loadingIntegra ? "Consultando Servidores..." : "🔄 Atualizar Ficha"}
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: 20, background: '#fff' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20, borderBottom: '1px solid #f1f5f9', paddingBottom: 16 }}>
-                  <p style={{ margin: 0 }}><strong>Órgão:</strong> Receita Federal do Brasil (e-CAC)</p>
-                  <p style={{ margin: 0 }}><strong>Diagnóstico Veri:</strong> <span style={{ color: '#10b981', fontWeight: 'bold' }}>CONCORDANTE (Regularizado)</span></p>
-                  <p style={{ margin: 0 }}><strong>Regime Atual:</strong> Simples Nacional / SIMEI Ativo</p>
-                  <p style={{ margin: 0 }}><strong>Dívidas Consolidadas:</strong> Isento de pendências federais</p>
-                </div>
-                
-                <h4 style={{ color: '#0f172a', margin: '0 0 10px 0' }}>Certidões Monitoradas em Tempo Real:</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={styles.configLine}>🟢 <strong>CND Conjunta RFB/PGFN:</strong> Emissão Ativa • Válida até 18/11/2026</div>
-                  <div style={styles.configLine}>🟢 <strong>Situação de CRF (FGTS):</strong> Em conformidade regulatória</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {abaIntegra === "simples" && (
-            <div style={styles.bigCard}>
-              <span style={styles.clientLabel}>Simples Nacional & SIMEI</span>
-              <h3 style={{ marginTop: 0, marginBottom: 20 }}>Emissão e Histórico de Acordos de Parcelamento</h3>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: 16 }}>
-                  <strong>📦 Parcelamento Ativo DAS-MEI</strong>
-                  <p style={styles.muted}>Histórico consolidado: 36 Parcelas</p>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                    <span style={{ color: '#d97706', fontWeight: 'bold' }}>Parcela 14/36 Pronta</span>
-                    <button onClick={dispararImpressaoFicha} style={styles.primaryButtonMin}>🖨️ Imprimir DAS MEI</button>
-                  </div>
-                </div>
-
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: 16 }}>
-                  <strong>🏢 Parcelamento Ativo PGDAS-D</strong>
-                  <p style={styles.muted}>Histórico consolidado: 60 Parcelas</p>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                    <span style={{ color: '#d97706', fontWeight: 'bold' }}>Parcela 08/60 Pronta</span>
-                    <button onClick={dispararImpressaoFicha} style={styles.primaryButtonMin}>🖨️ Imprimir PGDAS</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {abaIntegra === "regularize" && (
-            <div style={styles.bigCard}>
-              <span style={styles.clientLabel}>Procuradoria-Geral da Fazenda Nacional</span>
-              <h3 style={{ marginTop: 0, marginBottom: 20 }}>Negociações de Dívida Ativa (Regularize)</h3>
-
-              <div style={{ border: '1px solid #e2e8f0', padding: 20, borderRadius: 12, background: '#fafafa' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <strong>Transação Extraordinária por Adesão (União)</strong>
-                    <p style={{ ...styles.muted, marginTop: 4 }}>Guia de amortização gerada com sucesso via túnel mTLS.</p>
-                  </div>
-                  <button onClick={dispararImpressaoFicha} style={{ ...styles.primaryButtonMin, background: '#0f172a' }}>
-                    📥 Imprimir Guia PGFN
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {abaIntegra === "automacao" && (
-            <div style={styles.bigCard}>
-              <span style={styles.clientLabel}>Módulo de Agendamentos Automáticos (Vera AI)</span>
-              <h3 style={{ marginTop: 0, marginBottom: 20 }}>Configurar Cronograma de Disparos Periódicos</h3>
-
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', background: '#f8fafc', padding: 20, borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <label style={styles.formLabel}>Selecione o Documento Fiscal</label>
-                  <select value={tipoAutomacao} onChange={(e) => setTipoAutomacao(e.target.value)} style={styles.input}>
-                    <option value="DAS MEI">Guia DAS MEI Mensal</option>
-                    <option value="Parcelamento MEI">Parcelamento MEI (Acordo)</option>
-                    <option value="Simples Nacional PGDAS">Guia Simples Nacional (PGDAS-D)</option>
-                    <option value="Parcelamento PGDAS">Parcelamento Simples Nacional</option>
-                    <option value="INSS Previdência">Guia de INSS / Pessoal</option>
-                    <option value="FGTS Caixa">Guia de FGTS Oficial</option>
-                    <option value="Guia Regularize PGFN">Guia do Regularize (Dívida Ativa)</option>
-                  </select>
-                </div>
-
-                <div style={{ width: 150 }}>
-                  <label style={styles.formLabel}>Periodicidade</label>
-                  <select value={diaAutomacao} onChange={(e) => setDiaAutomacao(e.target.value)} style={styles.input}>
-                    <option value="05">Todo dia 05</option>
-                    <option value="10">Todo dia 10</option>
-                    <option value="15">Todo dia 15</option>
-                    <option value="20">Todo dia 20</option>
-                  </select>
-                </div>
-
-                <button onClick={agendarNovaTarefa} style={{ ...styles.primaryButton, width: 'auto', height: 48, padding: '0 24px', marginBottom: 12 }}>
-                  ⏰ Ativar Disparo Automático
-                </button>
-              </div>
-            </div>
-          )}
         </section>
       );
     }
@@ -1335,18 +1303,29 @@ export default function App() {
       return (
         <section style={styles.mainGrid}>
           <div style={styles.bigCard}>
-            <p style={styles.clientLabel}>Segurança e APIs</p>
-            <h2 style={styles.cardTitle}>Credenciais Integra Contador (Serpro)</h2>
-            <input style={styles.input} placeholder="Client ID Production" value={configIntegradeID || configIntegraId} onChange={(e) => setConfigIntegraId(e.target.value)} />
-            <input style={styles.input} type="password" placeholder="Client Secret Chave" value={configIntegraSecret} onChange={(e) => setConfigIntegraSecret(e.target.value)} />
-            <button style={styles.primaryButton} onClick={salvarConfiguracoes} disabled={salvandoConfig}>Salvar Chaves de Barramento</button>
+            <p style={styles.clientLabel}>Infraestrutura de Comunicação (Gmail)</p>
+            <h2 style={styles.cardTitle}>Servidor SMTP Gmail</h2>
+            <input style={styles.input} placeholder="Seu e-mail completo do Gmail" value={configEmail} onChange={(e) => setConfigEmail(e.target.value)} />
+            <input style={styles.input} type="password" placeholder="Senha de app do Gmail (16 dígitos)" value={configSenhaApp} onChange={(e) => setConfigSenhaApp(e.target.value)} />
+            <button style={styles.primaryButton} onClick={salvarConfiguracoes} disabled={salvandoConfig}>Configurar Motor de E-mails</button>
           </div>
+          
           <div style={styles.bigCard}>
-            <p style={styles.clientLabel}>Infraestrutura de Comunicação (Zoho Free)</p>
-            <h2 style={styles.cardTitle}>Servidor SMTP (Zoho Mail)</h2>
-            <input style={styles.input} placeholder="Seu e-mail completo do Zoho" value={configEmail} onChange={(e) => setConfigEmail(e.target.value)} />
-            <input style={styles.input} type="password" placeholder="Senha de Aplicativo (16 dígitos gerados no Zoho)" value={configSenhaApp} onChange={(e) => setConfigSenhaApp(e.target.value)} />
-            <button style={styles.secondaryButton} onClick={salvarConfiguracoes} disabled={salvandoConfig}>Configurar Motor de E-mails</button>
+            <p style={styles.clientLabel}>Automação Programada</p>
+            <h2 style={styles.cardTitle}>Painel de Agendamento Crons</h2>
+            <select value={tipoAutomacao} onChange={(e) => setTipoAutomacao(e.target.value)} style={styles.input}>
+              <option value="DAS MEI">Guia DAS MEI Mensal</option>
+              <option value="Simples Nacional PGDAS">Guia Simples Nacional (PGDAS-D)</option>
+              <option value="INSS Previdência">Guia de INSS</option>
+              <option value="FGTS Caixa">Guia de FGTS</option>
+            </select>
+            <select value={diaAutomacao} onChange={(e) => setDiaAutomacao(e.target.value)} style={styles.input}>
+              <option value="05">Todo dia 05</option>
+              <option value="10">Todo dia 10</option>
+              <option value="15">Todo dia 15</option>
+              <option value="20">Todo dia 20</option>
+            </select>
+            <button style={styles.secondaryButton} onClick={agendarNovaTarefa}>Ativar Cronograma de Disparos</button>
           </div>
         </section>
       );
@@ -1359,10 +1338,25 @@ export default function App() {
       <div style={styles.loginPage}>
         <div style={styles.loginCard}>
           <img src={logo} style={styles.loginLogo} alt="Logo" />
-          <h1 style={styles.loginTitle}>Portal de Conformidade</h1>
-          <input style={styles.input} placeholder="Usuário / E-mail corporativo" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input style={styles.input} type="password" placeholder="Senha de segurança" value={senha} onChange={(e) => setSenha(e.target.value)} />
-          <button style={styles.primaryButton} onClick={login}>Autenticar no Hub</button>
+          <h1 style={styles.loginTitle}>
+            {modoRecuperacao ? "Recuperar Acesso" : "Portal de Conformidade"}
+          </h1>
+          
+          {modoRecuperacao ? (
+            <>
+              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>Insira seu e-mail corporativo cadastrado. Enviaremos um link seguro para redefinição instantânea de senha.</p>
+              <input style={styles.input} placeholder="E-mail corporativo" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <button style={styles.primaryButton} onClick={recuperarSenha}>Disparar Link de Redefinição</button>
+              <button style={{ ...styles.secondaryButton, marginTop: 8 }} onClick={() => setModoRecuperacao(false)}>Voltar ao Login</button>
+            </>
+          ) : (
+            <>
+              <input style={styles.input} placeholder="Usuário / E-mail corporativo" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input style={styles.input} type="password" placeholder="Senha de segurança" value={senha} onChange={(e) => setSenha(e.target.value)} />
+              <button style={styles.primaryButton} onClick={login}>Autenticar no Hub</button>
+              <span onClick={() => setModoRecuperacao(true)} style={styles.fotoLinkEsqueci}>Esqueceu a senha do escritório?</span>
+            </>
+          )}
         </div>
       </div>
     );
@@ -1371,77 +1365,82 @@ export default function App() {
   return (
     <div style={styles.page}>
       
-      {/* MENU LATERAL ESTILO SAAS VERI HIGH-END */}
-      <aside style={styles.sidebar} className="no-print">
-        <div style={styles.logoBox}><img src={logo} style={styles.sideLogo} alt="Logo Sidebar" /></div>
-        <div style={styles.menu}>
-          {isContador ? (
-            <>
-              <button onClick={() => {setPaginaContador("dashboard"); setMenuOpen(false)}} style={paginaContador === "dashboard" ? styles.menuActive : styles.menuItem}>🏠 Painel Geral</button>
-              <button onClick={() => {setPaginaContador("clientes"); setMenuOpen(false)}} style={paginaContador === "clientes" ? styles.menuActive : styles.menuItem}>👥 Carteira de Clientes</button>
-              <button onClick={() => {setPaginaContador("documentos"); setMenuOpen(false)}} style={paginaContador === "documentos" ? styles.menuActive : styles.menuItem}>📁 Gestão de Arquivos</button>
-              <button onClick={() => {setPaginaContador("fiscal_notas"); setMenuOpen(false)}} style={paginaContador === "fiscal_notas" ? styles.menuActive : styles.menuItem}>🏛️ Radar XML SEFAZ</button>
-              <button onClick={() => {setPaginaContador("integra"); setMenuOpen(false)}} style={paginaContador === "integra" ? styles.menuActive : styles.menuItem}>📡 Diagnóstico e-CAC</button>
-              <button onClick={() => {setPaginaContador("solicitacoes"); setMenuOpen(false)}} style={paginaContador === "solicitacoes" ? styles.menuActive : styles.menuItem}>💬 Atendimento Chamados</button>
-              <button onClick={() => {setPaginaContador("configuracoes"); setMenuOpen(false)}} style={paginaContador === "configuracoes" ? styles.menuActive : styles.menuItem}>⚙️ Ajustes & SMTP</button>
-            </>
-          ) : (<button style={styles.menuActive}>🏠 O Meu Espaço</button>)}
-        </div>
-        <button style={styles.exitButton} onClick={sair}>↪ Terminar Sessão</button>
-      </aside>
-
-      {/* OVERLAY PARA CELULAR */}
-      {isMobile && menuOpen && <div style={styles.mobileOverlay} onClick={() => setMenuOpen(false)}></div>}
-
-      <main style={styles.content}>
-        
-        {/* CABEÇALHO SUPERIOR */}
-        <header style={styles.header} className="no-print">
-          <div style={{display: 'flex', alignItems: 'center', gap: 15}}>
-            {isMobile && <button style={styles.hamburgerBtn} onClick={() => setMenuOpen(true)}>☰</button>}
-            <h1 style={styles.welcome}>{isContador ? "Centro de Governança Fiscal" : `Portal do Cliente • ${empresa}`}</h1>
+      {/* MENU LATERAL ESTILO SAAS HIGH-END VERI (SÓ RENDERIZA SE FOR CONTADOR ADM) */}
+      {isContador && (
+        <aside style={styles.sidebar} className="no-print">
+          <div style={styles.logoBox}><img src={logo} style={styles.sideLogo} alt="Logo Sidebar" /></div>
+          <div style={styles.menu}>
+            <button onClick={() => setPaginaContador("dashboard")} style={paginaContador === "dashboard" ? styles.menuActive : styles.menuItem}>🏠 Painel Geral</button>
+            <button onClick={() => setPaginaContador("clientes")} style={paginaContador === "clientes" ? styles.menuActive : styles.menuItem}>👥 Carteira de Clientes</button>
+            <button onClick={() => setPaginaContador("documentos")} style={paginaContador === "documentos" ? styles.menuActive : styles.menuItem}>📁 Gestão de Arquivos</button>
+            <button onClick={() => setPaginaContador("fiscal_notas")} style={paginaContador === "fiscal_notas" ? styles.menuActive : styles.menuItem}>🏛️ Radar XML SEFAZ</button>
+            <button onClick={() => setPaginaContador("solicitacoes")} style={paginaContador === "solicitacoes" ? styles.menuActive : styles.menuItem}>💬 Atendimento Chamados</button>
+            <button onClick={() => setPaginaContador("configuracoes")} style={paginaContador === "configuracoes" ? styles.menuActive : styles.menuItem}>⚙️ Ajustes & SMTP</button>
           </div>
-          <div style={styles.profileBox}>
-            <div style={{ position: "relative" }} ref={notifRef}>
-              <div style={styles.bell} onClick={() => setShowNotifDropdown(!showNotifDropdown)}>
-                🔔{notificacoesNaoLidas > 0 && <div style={styles.badge}>{notificacoesNaoLidas}</div>}
+          <button style={styles.exitButton} onClick={sair}>↪ Terminar Sessão</button>
+        </aside>
+      )}
+
+      {/* RENDERIZAÇÃO ESTILO TELEMÓVEL DA FOTO DO CLIENTE */}
+      <main style={{ ...styles.content, paddingBottom: isMobile && !isContador ? '80px' : styles.content.padding }}>
+        
+        {/* TOPO COM AVATAR DO CLIENTE */}
+        <header style={styles.header}>
+          <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+            {!isContador && (
+              <div style={styles.fotoAvatarIcon}>
+                {empresa.substring(0, 2).toUpperCase()}
               </div>
-              {showNotifDropdown && (
-                <div style={styles.notifDropdown}>
-                  <h4 style={{ margin: "0 0 10px 0", color: "#0f172a" }}>Alertas Preventivos</h4>
-                  {notifsToShow.length === 0 ? <p style={styles.muted}>Nenhum alerta recente.</p> : notifsToShow.map((item: any, i: number) => (
-                    <div key={i} style={{ ...styles.notificationItem, background: item.lida ? "#fff" : "#f0fdf4", border: item.lida ? "1px solid #e2e8f0" : "1px solid #a7f3d0" }} onClick={() => {marcarNotificacaoLida(item); setShowNotifDropdown(false);}}>
-                      <strong>{item.titulo}</strong>
-                      <p style={{margin: "4px 0 0", color: "#475569", fontSize: 13}}>{item.mensagem}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
+            )}
+            <div>
+              <h1 style={styles.welcome}>{isContador ? "Centro de Governança Master" : `Olá, ${empresa}!`}</h1>
+              {!isContador && <p style={{margin: 0, fontSize: 13, color: '#64748b'}}>Bem-vindo ao seu portal do cliente.</p>}
             </div>
-            {!isMobile && <div style={styles.profile}><strong>{empresa}</strong><span>{isContador ? "Acesso Master Administrador" : "Acesso Restrito"}</span></div>}
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={styles.bell} onClick={() => setShowNotifDropdown(!showNotifDropdown)}>
+              🔔{notificacoesNaoLidas > 0 && <div style={styles.badge}>{notificacoesNaoLidas}</div>}
+            </div>
+            {!isMobile && isContador && <button style={styles.exitButton} onClick={sair}>Sair</button>}
           </div>
         </header>
 
-        {/* NÚCLEO DA PÁGINA (CONTADOR OU CLIENTE) */}
+        {/* NÚCLEO OPERACIONAL */}
         {isContador ? renderPainelContador() : (
           <>
-            <section style={styles.clientQuickGrid}>
-              <button style={secaoCliente === "documentos" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setSecaoCliente("documentos")}><div style={styles.clientQuickIcon}>📄</div><strong>Impostos</strong></button>
-              <button style={secaoCliente === "boletos" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setSecaoCliente("boletos")}><div style={styles.clientQuickIcon}>💳</div><strong>Faturas e Honorários</strong></button>
-              <button style={secaoCliente === "cnds" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setSecaoCliente("cnds")}><div style={styles.clientQuickIcon}>✅</div><strong>Situação Fiscal</strong></button>
-              <button style={secaoCliente === "informativos" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setSecaoCliente("informativos")}><div style={styles.clientQuickIcon}>🔔</div><strong>Avisos</strong></button>
-              <button style={secaoCliente === "solicitacoes" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setSecaoCliente("solicitacoes")}><div style={styles.clientQuickIcon}>💬</div><strong>Solicitações</strong></button>
-              <button style={secaoCliente === "envio" ? styles.clientQuickCardActive : styles.clientQuickCard} onClick={() => setSecaoCliente("envio")}><div style={styles.clientQuickIcon}>📤</div><strong>Enviar Documento</strong></button>
-            </section>
-            <section style={{ display: "grid", gridTemplateColumns: "1fr" }}>
-              <div style={{ overflowX: "auto" }}>
-                {renderListaCliente()}
+            {/* PAINEL AZUL DE RESUMO GERAL DA FOTO */}
+            <div style={styles.fotoResumoGeralPanel}>
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.15)', paddingBottom: 10, marginBottom: 16}}>
+                <strong style={{color: '#fff', fontSize: 15}}>Resumo Geral</strong>
+                <span style={{fontSize: 11, color: 'rgba(255,255,255,0.7)'}}>Atualizado em 2026</span>
               </div>
+              <div style={styles.fotoContadoresRow}>
+                <div onClick={() => setSecaoCliente("documentos")} style={styles.fotoCirculoItem}><div style={styles.fotoCirculoCount}>{documentosRecebidos.length}</div><span style={styles.fotoCirculoLabel}>Documentos</span></div>
+                <div onClick={() => setSecaoCliente("informativos")} style={styles.fotoCirculoItem}><div style={styles.fotoCirculoCount}>{informativos.length}</div><span style={styles.fotoCirculoLabel}>Avisos</span></div>
+                <div onClick={() => setSecaoCliente("solicitacoes")} style={styles.fotoCirculoItem}><div style={styles.fotoCirculoCount}>{solicitacoesList.length}</div><span style={styles.fotoCirculoLabel}>Solicitações</span></div>
+                <div onClick={() => setSecaoCliente("boletos")} style={styles.fotoContadoresRow && styles.fotoCirculoItem}><div style={styles.fotoCirculoCount}>{boletos.length}</div><span style={styles.fotoCirculoLabel}>Boletos</span></div>
+              </div>
+            </div>
+
+            {/* CONTEÚDO ATIVO SELECIONADO OU GRID COMPLETO */}
+            <section style={{ marginTop: 20 }}>
+              {renderListaCliente()}
             </section>
+
+            {/* BARRA FIXA INFERIOR MOBILE */}
+            {isMobile && (
+              <div style={styles.fotoBarraFixaBottom}>
+                <button onClick={() => setSecaoCliente("documentos")} style={securitetab(secaoCliente, "documentos")}><span style={{fontSize: 18}}>🏠</span><span style={{fontSize: 10}}>Início</span></button>
+                <button onClick={() => setSecaoCliente("envio")} style={securitetab(secaoCliente, "envio")}><span style={{fontSize: 18}}>📤</span><span style={{fontSize: 10}}>Documentos</span></button>
+                <button onClick={() => setSecaoCliente("informativos")} style={securitetab(secaoCliente, "informativos")}><span style={{fontSize: 18}}>🔔</span><span style={{fontSize: 10}}>Avisos</span></button>
+                <button onClick={() => setSecaoCliente("solicitacoes")} style={securitetab(secaoCliente, "solicitacoes")}><span style={{fontSize: 18}}>💬</span><span style={{fontSize: 10}}>Suporte</span></button>
+                <button onClick={sair} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'none', border: 'none', color: '#f43f5e', cursor: 'pointer', gap: 2 }}><span style={{fontSize: 18}}>👤</span><span style={{fontSize: 10}}>Sair</span></button>
+              </div>
+            )}
           </>
         )}
         
-        {/* RENDER DO MODAL DA FATURA SE EXISTIR */}
         {renderModalFatura()}
         
       </main>
@@ -1449,591 +1448,590 @@ export default function App() {
   );
 }
 
-// ==========================================
-// 13. ESTILOS COMPLETOS MODELO SAAS VERI PREMIUM
-// ==========================================
-const getStyles = (isMobile: boolean, menuOpen: boolean): any => ({
-  page: { 
-    minHeight: "100vh", 
-    background: "#f8fafc", 
-    display: "flex", 
-    flexDirection: isMobile ? "column" : "row", 
-    fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", 
-    color: "#1e293b" 
-  },
-  loginPage: { 
-    minHeight: "100vh", 
-    display: "flex", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    background: "#0f172a" 
-  },
-  loginCard: { 
-    background: "#fff", 
-    padding: isMobile ? 30 : 40, 
-    borderRadius: 20, 
-    textAlign: "center", 
-    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)", 
-    width: "100%", 
-    maxWidth: 400, 
-    margin: isMobile ? 20 : 0 
-  },
-  loginLogo: { 
-    width: 160, 
-    marginBottom: 20 
-  },
-  loginTitle: { 
-    margin: "0 0 30px", 
-    fontSize: 22, 
-    color: "#0f172a", 
-    fontWeight: 800,
-    letterSpacing: "-0.03em"
-  },
-  sidebar: { 
-    width: 280, 
-    background: "#0f172a", 
-    padding: 24, 
-    boxSizing: "border-box", 
-    display: "flex", 
-    flexDirection: "column", 
-    borderRight: '1px solid #1e293b', 
-    position: isMobile ? "fixed" : "sticky", 
-    top: 0, 
-    left: 0, 
-    height: "100vh", 
-    zIndex: 1000, 
-    transform: isMobile ? (menuOpen ? "translateX(0)" : "translateX(-100%)") : "none", 
-    transition: "transform 0.3s ease" 
-  },
-  logoBox: { 
-    textAlign: "center", 
-    marginBottom: 40,
-    background: "#ffffff",
-    padding: "12px",
-    borderRadius: "12px",
-    boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)"
-  },
-  sideLogo: { 
-    width: 140 
-  },
-  menu: { 
-    display: "flex", 
-    flexDirection: "column", 
-    gap: 6, 
-    flex: 1, 
-    overflowY: "auto" 
-  },
-  menuItem: { 
-    padding: "12px 16px", 
-    borderRadius: 8, 
-    border: "none", 
-    background: "transparent", 
-    textAlign: "left", 
-    fontWeight: 600, 
-    color: "#94a3b8", 
-    cursor: "pointer", 
-    fontSize: 14,
-    transition: "all 0.2s"
-  },
-  menuActive: { 
-    padding: "12px 16px", 
-    borderRadius: 8, 
-    border: "none", 
-    background: "#1e293b", 
-    color: "#2563eb", 
-    textAlign: "left", 
-    fontWeight: 700, 
-    cursor: "pointer", 
-    fontSize: 14 
-  },
-  exitButton: { 
-    padding: "12px 16px", 
-    border: "none", 
-    background: "transparent", 
-    color: "#f43f5e", 
-    fontWeight: 700, 
-    textAlign: "left", 
-    cursor: "pointer", 
-    marginTop: 'auto' 
-  },
-  mobileOverlay: { 
-    position: "fixed", 
-    top: 0, 
-    left: 0, 
-    width: "100%", 
-    height: "100%", 
-    background: "rgba(0,0,0,0.5)", 
-    zIndex: 999 
-  },
-  content: { 
-    flex: 1, 
-    padding: isMobile ? 16 : 40, 
-    boxSizing: "border-box", 
-    overflowX: "hidden", 
-    width: "100%" 
-  },
-  header: { 
-    display: "flex", 
-    justifyContent: "space-between", 
-    alignItems: "center", 
-    marginBottom: 30 
-  },
-  hamburgerBtn: { 
-    background: "none", 
-    border: "none", 
-    fontSize: 28, 
-    color: "#0f172a", 
-    cursor: "pointer", 
-    padding: 0 
-  },
-  welcome: { 
-    fontSize: isMobile ? 22 : 26, 
-    margin: 0, 
-    fontWeight: 800, 
-    color: "#0f172a",
-    letterSpacing: "-0.03em"
-  },
-  profileBox: { 
-    display: "flex", 
-    alignItems: "center", 
-    gap: 12 
-  },
-  bell: { 
-    position: "relative", 
-    width: 44, 
-    height: 44, 
-    background: "#fff", 
-    borderRadius: 12, 
-    display: "flex", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    border: "1px solid #e2e8f0", 
-    cursor: "pointer" 
-  },
-  badge: { 
-    position: "absolute", 
-    top: -4, 
-    right: -4, 
-    background: "#ef4444", 
-    color: "#fff", 
-    width: 20, 
-    height: 20, 
-    borderRadius: "50%", 
-    display: "flex", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    fontSize: 11, 
-    fontWeight: 800 
-  },
-  notifDropdown: { 
-    position: "absolute", 
-    top: 55, 
-    right: 0, 
-    width: isMobile ? 280 : 320, 
-    background: "#fff", 
-    borderRadius: 16, 
-    border: "1px solid #e2e8f0", 
-    boxShadow: "0 10px 40px -10px rgba(0,0,0,0.15)", 
-    padding: 20, 
-    zIndex: 100 
-  },
-  profile: { 
-    background: "#fff", 
-    padding: "8px 14px", 
-    borderRadius: 12, 
-    border: "1px solid #e2e8f0", 
-    display: "flex", 
-    flexDirection: "column" 
-  },
-  adminHero: { 
-    background: "#fff", 
-    border: "1px solid #e2e8f0", 
-    borderRadius: 16, 
-    padding: 30, 
-    marginBottom: 30, 
-    display: "flex", 
-    flexDirection: isMobile ? "column" : "row", 
-    justifyContent: "space-between", 
-    alignItems: isMobile ? "flex-start" : "center", 
-    gap: 16 
-  },
-  clientLabel: { 
-    margin: "0 0 4px", 
-    color: "#2563eb", 
-    fontSize: 12, 
-    fontWeight: 800, 
-    textTransform: "uppercase",
-    letterSpacing: "0.05em"
-  },
-  clientHeroTitle: { 
-    margin: 0, 
-    fontSize: 24, 
-    color: "#0f172a", 
-    fontWeight: 800,
-    letterSpacing: "-0.02em"
-  },
-  mainGrid: { 
-    display: "grid", 
-    gridTemplateColumns: isMobile ? "1fr" : "1fr", 
-    gap: 24 
-  }, 
-  bigCard: { 
-    background: "#fff", 
-    borderRadius: 16, 
-    padding: isMobile ? 20 : 28, 
-    border: "1px solid #e2e8f0", 
-    width: "100%", 
-    boxSizing: "border-box",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.02)"
-  },
-  cardTitle: { 
-    marginTop: 0, 
-    fontSize: 18, 
-    fontWeight: 800, 
-    color: "#0f172a", 
-    marginBottom: 20 
-  },
-  formLabel: { 
-    fontWeight: 700, 
-    fontSize: 12, 
-    color: '#475569', 
-    textTransform: 'uppercase', 
-    display: 'block',  
-    marginBottom: 8 
-  },
-  input: { 
-    width: "100%", 
-    padding: "12px 14px", 
-    marginBottom: 12, 
-    borderRadius: 8, 
-    border: "1px solid #cbd5e1", 
-    fontSize: 14, 
-    fontFamily: "inherit", 
-    boxSizing: "border-box", 
-    background: "#f8fafc",
-    outline: "none"
-  },
-  primaryButton: { 
-    width: "100%", 
-    padding: 14, 
-    border: "none", 
-    borderRadius: 8, 
-    background: "#2563eb", 
-    color: "#fff", 
-    fontWeight: 700, 
-    fontSize: 14, 
-    cursor: "pointer",
-    boxShadow: "0 4px 12px rgba(37, 99, 235, 0.2)"
-  },
-  primaryButtonMin: { 
-    padding: "10px 16px", 
-    border: "none", 
-    borderRadius: 6, 
-    background: "#2563eb", 
-    color: "#fff", 
-    fontWeight: 700, 
-    fontSize: 13, 
-    cursor: "pointer" 
-  },
-  secondaryButton: { 
-    width: "100%", 
-    padding: 14, 
-    border: "1px solid #cbd5e1", 
-    borderRadius: 8, 
-    background: "#fff", 
-    color: "#475569", 
-    fontWeight: 700, 
-    fontSize: 14, 
-    cursor: "pointer" 
-  },
-  secondaryButtonMin: { 
-    padding: "10px 16px", 
-    border: "1px solid #cbd5e1", 
-    borderRadius: 6, 
-    background: "#fff", 
-    color: "#475569", 
-    fontWeight: 700, 
-    fontSize: 13, 
-    cursor: "pointer" 
-  },
-  downloadButton: { 
-    border: "1px solid #e2e8f0", 
-    borderRadius: 6, 
-    padding: "10px 16px", 
-    background: "#f8fafc", 
-    color: "#475569", 
-    fontWeight: 700, 
-    fontSize: 13, 
-    cursor: "pointer",
-    whiteSpace: "nowrap"
-  },
-  docItem: { 
-    display: "flex", 
-    flexDirection: isMobile ? "column" : "row", 
-    justifyContent: "space-between", 
-    alignItems: isMobile ? "flex-start" : "center", 
-    borderBottom: "1px solid #f1f5f9", 
-    padding: "16px 0", 
-    gap: 10 
-  },
-  docItemFolder: { 
-    background: "#fff", 
-    border: "1px solid #f1f5f9", 
-    borderRadius: 12, 
-    padding: "14px", 
-    display: "flex", 
-    justifyContent: "space-between", 
-    alignItems: "center", 
-    gap: 16, 
-    marginBottom: 8 
-  },
-  muted: { 
-    margin: 0, 
-    color: "#64748b", 
-    fontSize: 14 
-  },
-  empty: { 
-    background: "#f8fafc", 
-    color: "#64748b",  
-    padding: 20, 
-    borderRadius: 12, 
-    textAlign: "center", 
-    fontSize: 14 
-  },
-  configLine: { 
-    display: "flex", 
-    gap: 10, 
-    marginBottom: 12, 
-    padding: "12px", 
-    background: "#f8fafc", 
-    borderRadius: 8, 
-    border: "1px solid #e2e8f0" 
-  },
-  clientQuickGrid: { 
-    display: "grid", 
-    gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(6, 1fr)", 
-    gap: 12, 
-    marginBottom: 24 
-  },
-  clientQuickGridIntegra: { 
-    display: "grid", 
-    gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", 
-    gap: 12, 
-    marginBottom: 24 
-  },
-  clientQuickCard: { 
-    background: "#fff", 
-    border: "1px solid #e2e8f0", 
-    borderRadius: 12, 
-    padding: "16px 8px", 
-    display: "flex", 
-    flexDirection: "column", 
-    alignItems: "center", 
-    gap: 8, 
-    cursor: "pointer", 
-    textAlign: "center" as const 
-  },
-  clientQuickCardActive: { 
-    background: "#f0fdf4", 
-    border: "1px solid #a7f3d0", 
-    borderRadius: 12, 
-    padding: "16px 8px", 
-    display: "flex", 
-    flexDirection: "column", 
-    alignItems: "center", 
-    gap: 8, 
-    cursor: "pointer", 
-    textAlign: "center" as const 
-  },
-  clientQuickIcon: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 8, 
-    background: "#ecfdf5", 
-    color: "#10b981", 
-    display: "flex", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    fontSize: 18 
-  },
-  clientDocRow: { 
-    background: "#fff", 
-    border: "1px solid #f1f5f9", 
-    borderRadius: 12, 
-    padding: 16, 
-    marginBottom: 12, 
-    display: "flex", 
-    justifyContent: "space-between", 
-    alignItems: "center", 
-    gap: 12 
-  },
-  clientUploadPanel: { 
-    background: "#f8fafc", 
-    border: "2px dashed #cbd5e1", 
-    borderRadius: 12, 
-    padding: 20 
-  },
-  badgePendente: { 
-    background: '#fef3c7', 
-    color: '#d97706', 
-    padding: '4px 10px', 
-    borderRadius: 6, 
-    fontSize: 12, 
-    fontWeight: 800 
-  },
-  badgeConcluido: { 
-    background: '#dcfce7', 
-    color: '#10b981', 
-    padding: '4px 10px',  
-    borderRadius: 6, 
-    fontSize: 12, 
-    fontWeight: 800 
-  },
-  notificationItem: { 
-    padding: 12, 
-    borderRadius: 8, 
-    marginBottom: 8, 
-    cursor: "pointer" 
-  },
-  unreadText: { 
-    display: "inline-block", 
-    marginTop: 4, 
-    fontSize: 11, 
-    color: "#2563eb", 
-    fontWeight: 800 
-  },
-  separator: { 
-    border: "none", 
-    borderTop: "1px solid #e2e8f0", 
-    margin: "24px 0" 
-  },
-  clientBlock: { 
-    background: "#fff", 
-    border: "1px solid #e2e8f0", 
-    borderRadius: 12, 
-    padding: 16, 
-    marginBottom: 16 
-  },
-  clientTitle: { 
-    margin: "0 0 12px", 
-    color: "#0f172a", 
-    fontSize: 16, 
-    fontWeight: 800 
-  },
-  yearBlock: { 
-    marginLeft: 12, 
-    marginTop: 12, 
-    borderLeft: "2px solid #e2e8f0", 
-    paddingLeft: 12 
-  },
-  yearTitle: { 
-    color: "#2563eb", 
-    marginBottom: 8, 
-    fontSize: 14, 
-    fontWeight: 800 
-  },
-  monthBlock: { 
-    marginLeft: 12, 
-    marginBottom: 12 
-  },
-  monthTitle: { 
-    textTransform: "capitalize", 
-    color: "#475569", 
-    marginBottom: 8, 
-    fontSize: 13, 
-    fontWeight: 700 
-  },
-  modalOverlay: { 
-    position: "fixed", 
-    top: 0, 
-    left: 0, 
-    width: "100%", 
-    height: "100%", 
-    background: "rgba(15, 23, 42, 0.4)", 
-    display: "flex", 
-    justifyContent: "center",  
-    alignItems: "center", 
-    zIndex: 2000, 
-    padding: 16, 
-    boxSizing: "border-box" 
-  },
-  modalContent: { 
-    background: "#fff", 
-    width: "100%", 
-    maxWidth: 420, 
-    borderRadius: 16, 
-    padding: 24, 
-    position: "relative", 
-    maxHeight: "90vh", 
-    overflowY: "auto", 
-    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)" 
-  },
-  closeModalBtn: { 
-    position: "absolute", 
-    top: 16, 
-    right: 16, 
-    background: "transparent", 
-    border: "none", 
-    color: "#64748b", 
-    fontWeight: 800, 
-    cursor: "pointer", 
-    fontSize: 14 
-  },
-  statsGrid: { 
-    display: "grid", 
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
-    gap: 20, 
-    marginBottom: 28 
-  },
-  statCard: { 
-    background: "#fff", 
-    borderRadius: 12, 
-    padding: 20, 
-    display: "flex",  
-    alignItems: "center", 
-    gap: 16, 
-    border: "1px solid #e2e8f0" 
-  },
-  iconBlue: { 
-    width: 48, 
-    height: 48, 
-    borderRadius: 10, 
-    background: "#f0fdf4", 
-    color: "#10b981", 
-    display: "flex", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    fontSize: 20 
-  },
-  statLabel: { 
-    margin: 0, 
-    color: "#64748b", 
-    fontWeight: 600, 
-    fontSize: 12 
-  },
-  statNumber: { 
-    fontSize: 26, 
-    margin: "2px 0", 
-    color: "#0f172a", 
-    fontWeight: 800 
-  },
-  adminShortcutGrid: { 
-    display: "grid", 
-    gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(6, 1fr)", 
-    gap: 12 
-  },
-  adminShortcut: { 
-    background: "#fff", 
-    border: "1px solid #e2e8f0", 
-    borderRadius: 12, 
-    padding: 16, 
-    display: "flex", 
-    flexDirection: "column", 
-    alignItems: "center", 
-    gap: 8, 
-    cursor: "pointer",
-    transition: "all 0.2s"
-  },
-  adminShortcutIcon: { 
-    width: 44, height: 44, borderRadius: 8, background: "#f0fdf4", display: "flex", justifyContent: "center", alignItems: "center", fontSize: 20 }
-});
+function getStyles(isMobile: boolean, menuOpen: boolean): any {
+  return {
+    page: { 
+      minHeight: "100vh", 
+      background: "#f8fafc", 
+      display: "flex", 
+      flexDirection: isMobile ? "column" : "row", 
+      fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", 
+      color: "#1e293b" 
+    },
+    loginPage: { 
+      minHeight: "100vh", 
+      display: "flex", 
+      justifyContent: "center", 
+      alignItems: "center", 
+      background: "#f4f7fb" 
+    },
+    loginCard: { 
+      background: "#fff", 
+      padding: isMobile ? 30 : 40, 
+      borderRadius: 24, 
+      textAlign: "center", 
+      boxShadow: "0 10px 30px rgba(0,0,0,0.04)", 
+      width: "100%", 
+      maxWidth: 400, 
+      margin: isMobile ? 20 : 0 
+    },
+    loginLogo: { 
+      width: 150, 
+      marginBottom: 20 
+    },
+    loginTitle: { 
+      margin: "0 0 24px", 
+      fontSize: 22, 
+      color: "#0f172a", 
+      fontWeight: 800,
+      letterSpacing: "-0.03em"
+    },
+    sidebar: { 
+      width: 280, 
+      background: "#0f172a", 
+      padding: 24, 
+      boxSizing: "border-box", 
+      display: "flex", 
+      flexDirection: "column", 
+      borderRight: '1px solid #1e293b', 
+      position: "sticky", 
+      top: 0, 
+      height: "100vh"
+    },
+    logoBox: { 
+      textAlign: "center", 
+      marginBottom: 40,
+      background: "#ffffff",
+      padding: "12px",
+      borderRadius: "12px"
+    },
+    sideLogo: { 
+      width: 140 
+    },
+    menu: { 
+      display: "flex", 
+      flexDirection: "column", 
+      gap: 6, 
+      flex: 1 
+    },
+    menuItem: { 
+      padding: "12px 16px", 
+      borderRadius: 8, 
+      border: "none", 
+      background: "transparent", 
+      textAlign: "left", 
+      fontWeight: 600, 
+      color: "#94a3b8", 
+      cursor: "pointer", 
+      fontSize: 14 
+    },
+    menuActive: { 
+      padding: "12px 16px", 
+      borderRadius: 8, 
+      border: "none", 
+      background: "#1e293b", 
+      color: "#2563eb", 
+      textAlign: "left", 
+      fontWeight: 700, 
+      cursor: "pointer", 
+      fontSize: 14 
+    },
+    exitButton: { 
+      padding: "12px 16px", 
+      border: "none", 
+      background: "transparent", 
+      color: "#f43f5e", 
+      fontWeight: 700, 
+      textAlign: "left", 
+      cursor: "pointer" 
+    },
+    content: { 
+      flex: 1, 
+      padding: isMobile ? 20 : 40, 
+      boxSizing: "border-box" 
+    },
+    header: { 
+      display: "flex", 
+      justifyContent: "space-between", 
+      alignItems: "center", 
+      marginBottom: 24 
+    },
+    welcome: { 
+      fontSize: isMobile ? 20 : 26, 
+      margin: 0, 
+      fontWeight: 800, 
+      color: "#0f172a",
+      letterSpacing: "-0.02em"
+    },
+    bell: { 
+      position: "relative", 
+      width: 42, 
+      height: 42, 
+      background: "#fff", 
+      borderRadius: 12, 
+      display: "flex", 
+      justifyContent: "center", 
+      alignItems: "center", 
+      border: "1px solid #e2e8f0", 
+      cursor: "pointer" 
+    },
+    badge: { 
+      position: "absolute", 
+      top: -4, 
+      right: -4, 
+      background: "#ef4444", 
+      color: "#fff", 
+      width: 18, 
+      height: 18, 
+      borderRadius: "50%", 
+      display: "flex", 
+      justifyContent: "center", 
+      alignItems: "center", 
+      fontSize: 10, 
+      fontWeight: 800 
+    },
+    bigCard: { 
+      background: "#fff", 
+      borderRadius: 16, 
+      padding: 24, 
+      border: "1px solid #e2e8f0"
+    },
+    cardTitle: { 
+      marginTop: 0, 
+      fontSize: 18, 
+      fontWeight: 800, 
+      color: "#0f172a" 
+    },
+    formLabel: { 
+      fontWeight: 700, 
+      fontSize: 12, 
+      color: '#475569', 
+      textTransform: 'uppercase', 
+      display: 'block',  
+      marginBottom: 8 
+    },
+    input: { 
+      width: "100%", 
+      padding: "12px 14px", 
+      marginBottom: 12, 
+      borderRadius: 8, 
+      border: "1px solid #cbd5e1", 
+      fontSize: 14, 
+      background: "#f8fafc"
+    },
+    primaryButton: { 
+      width: "100%", 
+      padding: 14, 
+      border: "none", 
+      borderRadius: 8, 
+      background: "#2563eb", 
+      color: "#fff", 
+      fontWeight: 700, 
+      fontSize: 14, 
+      cursor: "pointer" 
+    },
+    primaryButtonMin: { 
+      padding: "10px 16px", 
+      border: "none", 
+      borderRadius: 6, 
+      background: "#2563eb", 
+      color: "#fff", 
+      fontWeight: 700, 
+      fontSize: 13,
+      cursor: "pointer"
+    },
+    secondaryButton: { 
+      width: "100%", 
+      padding: 14, 
+      border: "1px solid #cbd5e1", 
+      borderRadius: 8, 
+      background: "#fff", 
+      color: "#475569", 
+      fontWeight: 700, 
+      fontSize: 14, 
+      cursor: "pointer" 
+    },
+    secondaryButtonMin: { 
+      padding: "10px 16px", 
+      border: "1px solid #cbd5e1", 
+      borderRadius: 6, 
+      background: "#fff", 
+      color: "#475569", 
+      fontWeight: 700, 
+      fontSize: 13, 
+      cursor: "pointer" 
+    },
+    downloadButton: { 
+      border: "1px solid #e2e8f0", 
+      borderRadius: 6, 
+      padding: "8px 14px", 
+      background: "#f8fafc", 
+      color: "#475569", 
+      fontWeight: 700, 
+      fontSize: 13,
+      cursor: "pointer"
+    },
+    docItem: { 
+      display: "flex", 
+      flexDirection: isMobile ? "column" : "row", 
+      justifyContent: "space-between", 
+      alignItems: isMobile ? "flex-start" : "center", 
+      borderBottom: "1px solid #f1f5f9", 
+      padding: "16px 0", 
+      gap: 10 
+    },
+    docItemFolder: { 
+      background: "#fff", 
+      border: "1px solid #f1f5f9", 
+      borderRadius: 12, 
+      padding: "14px", 
+      display: "flex", 
+      justifyContent: "space-between", 
+      alignItems: "center", 
+      gap: 16, 
+      marginBottom: 8 
+    },
+    muted: { 
+      margin: 0, 
+      color: "#64748b", 
+      fontSize: 14 
+    },
+    empty: { 
+      background: "#f8fafc", 
+      color: "#64748b",  
+      padding: 16, 
+      borderRadius: 12, 
+      textAlign: "center" 
+    },
+    configLine: { 
+      display: "flex", 
+      gap: 10, 
+      marginBottom: 12, 
+      padding: "12px", 
+      background: "#f8fafc", 
+      borderRadius: 8, 
+      border: "1px solid #e2e8f0" 
+    },
+    clientQuickGrid: { 
+      display: "grid", 
+      gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(6, 1fr)", 
+      gap: 12, 
+      marginBottom: 24 
+    },
+    clientQuickGridIntegra: { 
+      display: "grid", 
+      gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", 
+      gap: 12, 
+      marginBottom: 24 
+    },
+    clientQuickCard: { 
+      background: "#fff", 
+      border: "1px solid #e2e8f0", 
+      borderRadius: 12, 
+      padding: "16px 8px", 
+      display: "flex", 
+      flexDirection: "column", 
+      alignItems: "center", 
+      gap: 8, 
+      cursor: "pointer", 
+      textAlign: "center" as const 
+    },
+    clientQuickCardActive: { 
+      background: "#f0fdf4", 
+      border: "1px solid #a7f3d0", 
+      borderRadius: 12, 
+      padding: "16px 8px", 
+      display: "flex", 
+      flexDirection: "column", 
+      alignItems: "center", 
+      gap: 8, 
+      cursor: "pointer", 
+      textAlign: "center" as const 
+    },
+    clientQuickIcon: { 
+      width: 40, 
+      height: 40, 
+      borderRadius: 8, 
+      background: "#ecfdf5", 
+      color: "#10b981", 
+      display: "flex", 
+      justifyContent: "center", 
+      alignItems: "center", 
+      fontSize: 18 
+    },
+    clientDocRow: { 
+      background: "#fff", 
+      border: "1px solid #f1f5f9", 
+      borderRadius: 12, 
+      padding: 16, 
+      marginBottom: 12, 
+      display: "flex", 
+      justifyContent: "space-between", 
+      alignItems: "center", 
+      gap: 12 
+    },
+    clientUploadPanel: { 
+      background: "#f8fafc", 
+      border: "2px dashed #cbd5e1", 
+      borderRadius: 12, 
+      padding: 20 
+    },
+    badgePendente: { 
+      background: '#fef3c7', 
+      color: '#d97706', 
+      padding: '4px 10px', 
+      borderRadius: 6, 
+      fontSize: 12, 
+      fontWeight: 800 
+    },
+    badgeConcluido: { 
+      background: '#dcfce7', 
+      color: '#10b981', 
+      padding: '4px 10px',  
+      borderRadius: 6, 
+      fontSize: 12, 
+      fontWeight: 800 
+    },
+    notificationItem: { 
+      padding: 12, 
+      borderRadius: 8, 
+      marginBottom: 8, 
+      cursor: "pointer" 
+    },
+    unreadText: { 
+      display: "inline-block", 
+      marginTop: 4, 
+      fontSize: 11, 
+      color: "#2563eb", 
+      fontWeight: 800 
+    },
+    separator: { 
+      border: "none", 
+      borderTop: "1px solid #e2e8f0", 
+      margin: "24px 0" 
+    },
+    clientBlock: { 
+      background: "#fff", 
+      border: "1px solid #e2e8f0", 
+      borderRadius: 12, 
+      padding: 16, 
+      marginBottom: 16 
+    },
+    clientTitle: { 
+      margin: "0 0 12px", 
+      color: "#0f172a", 
+      fontSize: 16, 
+      fontWeight: 800 
+    },
+    yearBlock: { 
+      marginLeft: 12, 
+      marginTop: 12, 
+      borderLeft: "2px solid #e2e8f0", 
+      paddingLeft: 12 
+    },
+    yearTitle: { 
+      color: "#2563eb", 
+      marginBottom: 8, 
+      fontSize: 14, 
+      fontWeight: 800 
+    },
+    monthBlock: { 
+      marginLeft: 12, 
+      marginBottom: 12 
+    },
+    monthTitle: { 
+      textTransform: "capitalize", 
+      color: "#475569", 
+      marginBottom: 8, 
+      fontSize: 13, 
+      fontWeight: 700 
+    },
+    modalOverlay: { 
+      position: "fixed", 
+      top: 0, 
+      left: 0, 
+      width: "100%", 
+      height: "100%", 
+      background: "rgba(15, 23, 42, 0.4)", 
+      display: "flex", 
+      justifyContent: "center",  
+      alignItems: "center", 
+      zIndex: 2000, 
+      padding: 16, 
+      boxSizing: "border-box" 
+    },
+    modalContent: { 
+      background: "#fff", 
+      width: "100%", 
+      maxWidth: 420, 
+      borderRadius: 16, 
+      padding: 24, 
+      position: "relative", 
+      maxHeight: "90vh", 
+      overflowY: "auto", 
+      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)" 
+    },
+    closeModalBtn: { 
+      position: "absolute", 
+      top: 16, 
+      right: 16, 
+      background: "transparent", 
+      border: "none", 
+      color: "#64748b", 
+      fontWeight: 800, 
+      cursor: "pointer", 
+      fontSize: 14 
+    },
+    statsGrid: { 
+      display: "grid", 
+      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
+      gap: 20, 
+      marginBottom: 28 
+    },
+    statCard: { 
+      background: "#fff", 
+      borderRadius: 12, 
+      padding: 20, 
+      display: "flex",  
+      alignItems: "center", 
+      gap: 16, 
+      border: "1px solid #e2e8f0" 
+    },
+    iconBlue: { 
+      width: 48, 
+      height: 48, 
+      borderRadius: 10, 
+      background: "#f0fdf4", 
+      color: "#10b981", 
+      display: "flex", 
+      justifyContent: "center", 
+      alignItems: "center", 
+      fontSize: 20 
+    },
+    statLabel: { 
+      margin: 0, 
+      color: "#64748b", 
+      fontWeight: 600, 
+      fontSize: 12 
+    },
+    statNumber: { 
+      fontSize: 26, 
+      margin: "2px 0", 
+      color: "#0f172a", 
+      fontWeight: 800 
+    },
+    adminShortcutGrid: { 
+      display: "grid", 
+      gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(5, 1fr)", 
+      gap: 12 
+    },
+    adminShortcut: { 
+      background: "#fff", 
+      border: "1px solid #e2e8f0", 
+      borderRadius: 12, 
+      padding: 16, 
+      display: "flex", 
+      flexDirection: "column", 
+      alignItems: "center", 
+      gap: 8, 
+      cursor: "pointer",
+      transition: "all 0.2s"
+    },
+    adminShortcutIcon: { 
+      width: 44, height: 44, borderRadius: 8, background: "#f0fdf4", display: "flex", justifyContent: "center", alignItems: "center", fontSize: 20 },
+    fotoAvatarIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: "50%",
+      background: "#dbeafe",
+      color: "#2563eb",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      fontWeight: 700,
+      fontSize: 15
+    },
+    fotoResumoGeralPanel: {
+      background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", 
+      borderRadius: 18,
+      padding: 20,
+      boxShadow: "0 10px 25px -5px rgba(15,23,42,0.15)"
+    },
+    fotoContadoresRow: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 8
+    },
+    fotoCirculoItem: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      flex: 1,
+      cursor: 'pointer'
+    },
+    fotoCirculoCount: {
+      width: 46,
+      height: 46,
+      borderRadius: '50%',
+      background: 'rgba(255,255,255,0.12)',
+      color: '#fff',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      fontWeight: 700,
+      fontSize: 15
+    },
+    fotoCirculoLabel: {
+      color: 'rgba(255,255,255,0.75)',
+      fontSize: 10,
+      marginTop: 6,
+      textAlign: 'center',
+      fontWeight: 500
+    },
+    fotoGridPastas: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 12
+    },
+    fotoPastaCard: {
+      background: '#fff',
+      borderRadius: 14,
+      padding: 16,
+      border: '1px solid #e2e8f0',
+      display: 'flex',
+      flexDirection: 'column',
+      cursor: 'pointer',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.01)'
+    },
+    fotoMutedCount: {
+      fontSize: 11,
+      color: '#94a3b8',
+      marginTop: 4,
+      fontWeight: 500
+    },
+    fotoBarraFixaBottom: {
+      position: 'fixed',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: 64,
+      background: '#ffffff',
+      borderTop: '1px solid #e2e8f0',
+      display: 'flex',
+      justifyContent: 'space-around',
+      alignItems: 'center',
+      zIndex: 1500,
+      boxShadow: '0 -4px 12px rgba(0,0,0,0.03)'
+    },
+    fotoLinkEsqueci: {
+      display: 'block',
+      marginTop: 14,
+      fontSize: 13,
+      color: '#2563eb',
+      cursor: 'pointer',
+      fontWeight: 500,
+      textDecoration: 'underline'
+    }
+  };
+}

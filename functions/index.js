@@ -1,119 +1,103 @@
 const { onRequest } = require("firebase-functions/v2/https");
-const admin = require("firebase-admin");
-const axios = require("axios");
+const nodemailer = require("nodemailer");
 
-admin.initializeApp();
+/**
+ * Envio de e-mails via Gmail.
+ *
+ * Como usar:
+ * - No portal, em Configurações, informe:
+ *   1) E-mail Gmail remetente
+ *   2) Senha de app do Gmail com 16 dígitos
+ *
+ * Observação:
+ * Não use a senha normal do Gmail.
+ * Use senha de app gerada na Conta Google com verificação em duas etapas ativada.
+ */
 
-// Definimos a função usando a v2 e injetamos o segredo
-exports.criarBoletoAsaas = onRequest({ secrets: ["ASAAS_API_KEY"], cors: true }, async (req, res) => {
+exports.enviarEmailGmail = onRequest({ cors: true }, async (req, res) => {
   try {
-    const { nome, email, cpfCnpj, valor, vencimento, descricao } = req.body;
-    
-    // Na v2, o segredo fica disponível diretamente em process.env
-    const ASAAS_API_KEY = process.env.ASAAS_API_KEY;
+    const {
+      para,
+      nome,
+      arquivo,
+      assunto,
+      mensagem,
+      tipo,
+      remetente_email,
+      remetente_senha,
+    } = req.body || {};
 
-    if (!ASAAS_API_KEY) {
-      return res.status(500).send({ sucesso: false, mensagem: "Chave API não configurada." });
-    }
-
-    // 1. Criar cliente no Asaas
-    const clienteResponse = await axios.post(
-      "https://sandbox.asaas.com/api/v3/customers",
-      { name: nome, email, cpfCnpj },
-      { headers: { access_token: ASAAS_API_KEY, "Content-Type": "application/json" } }
-    );
-
-    // 2. Gerar o boleto
-    const boletoResponse = await axios.post(
-      "https://sandbox.asaas.com/api/v3/payments",
-      {
-        customer: clienteResponse.data.id,
-        billingType: "BOLETO",
-        value: Number(valor),
-        dueDate: vencimento,
-        description: descricao,
-      },
-      { headers: { access_token: ASAAS_API_KEY, "Content-Type": "application/json" } }
-    );
-
-    res.status(200).send({
-      sucesso: true,
-      id: boletoResponse.data.id,
-      boleto: boletoResponse.data.bankSlipUrl,
-      invoiceUrl: boletoResponse.data.invoiceUrl,
-    });
-
-  } catch (erro) {
-    console.error("Erro detalhado:", erro.response?.data || erro.message);
-    res.status(500).send({
-      sucesso: false,
-      erro: erro.response?.data || erro.message,
-    });
-  }
-});
-// ======================================================
-// CRIAR CLIENTE COM SENHA
-// ======================================================
-
-exports.criarClienteComSenha = onRequest({ cors: true }, async (req, res) => {
-  try {
-    const { nomeEmpresa, email, senha, cnpj } = req.body;
-
-    if (!nomeEmpresa || !email || !senha) {
+    if (!para) {
       return res.status(400).send({
         sucesso: false,
-        erro: "Informe nome da empresa, e-mail e senha.",
+        erro: "E-mail do destinatário não informado.",
       });
     }
 
-    if (String(senha).length < 6) {
+    if (!remetente_email || !remetente_senha) {
       return res.status(400).send({
         sucesso: false,
-        erro: "A senha precisa ter no mínimo 6 caracteres.",
+        erro: "E-mail Gmail ou senha de app não configurados.",
       });
     }
 
-    let usuario;
-
-    try {
-      usuario = await admin.auth().createUser({
-        email,
-        password: senha,
-        displayName: nomeEmpresa,
-        disabled: false,
-      });
-    } catch (erroAuth) {
-      if (erroAuth.code === "auth/email-already-exists") {
-        usuario = await admin.auth().getUserByEmail(email);
-      } else {
-        throw erroAuth;
-      }
-    }
-
-    await admin.firestore().collection("clientes").doc(usuario.uid).set(
-      {
-        uid: usuario.uid,
-        nomeEmpresa,
-        email,
-        cnpj: cnpj || "",
-        criadoEm: new Date(),
-        ativo: true,
-        tipoUsuario: "cliente",
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: remetente_email,
+        pass: String(remetente_senha).replace(/\s/g, ""),
       },
-      { merge: true }
-    );
+    });
+
+    const titulo =
+      assunto ||
+      (tipo === "cliente_enviou"
+        ? "Cliente enviou novo documento pelo portal"
+        : "Novo documento disponível no Portal Contábil");
+
+    const textoPrincipal =
+      mensagem ||
+      (tipo === "cliente_enviou"
+        ? `Um cliente enviou o arquivo ${arquivo || "sem nome"} pelo portal.`
+        : `Um novo documento foi disponibilizado para você no Portal Contábil.`);
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;background:#f6f8fb;padding:28px;">
+        <div style="max-width:620px;margin:auto;background:#ffffff;border-radius:18px;padding:28px;border:1px solid #e5e7eb;">
+          <h2 style="margin:0 0 12px;color:#111827;">${titulo}</h2>
+          <p style="font-size:15px;color:#374151;line-height:1.6;">Olá, ${nome || "usuário"}.</p>
+          <p style="font-size:15px;color:#374151;line-height:1.6;">${textoPrincipal}</p>
+          ${
+            arquivo
+              ? `<div style="background:#f3f4f6;border-radius:12px;padding:14px;margin:18px 0;">
+                   <strong>Arquivo:</strong> ${arquivo}
+                 </div>`
+              : ""
+          }
+          <p style="font-size:13px;color:#6b7280;margin-top:22px;">
+            Acesse o Portal Contábil para visualizar os detalhes.
+          </p>
+        </div>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `"Portal Contábil" <${remetente_email}>`,
+      to: para,
+      subject: titulo,
+      text: `${textoPrincipal}\n\nArquivo: ${arquivo || ""}`,
+      html,
+    });
 
     return res.status(200).send({
       sucesso: true,
-      uid: usuario.uid,
-      mensagem: "Cliente criado com login e senha.",
+      mensagem: "E-mail enviado com sucesso.",
     });
   } catch (erro) {
-    console.error("Erro ao criar cliente:", erro);
-
+    console.error("Erro ao enviar e-mail Gmail:", erro);
     return res.status(500).send({
       sucesso: false,
-      erro: erro.message || "Erro ao criar cliente.",
+      erro: erro.message || "Erro ao enviar e-mail.",
     });
   }
 });
